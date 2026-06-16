@@ -15,12 +15,12 @@ from astrbot.api.event import MessageChain, filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register, StarTools
 
 from .api.bgm_api import BGMAPI
-from .api.bilibili_api import BilibiliAPI
 from .api.date_utils import get_current_date_info
 from .api.hitokoto_api import HitokotoAPI
 from .api.holiday_api import HolidayAPI
-from .api.ithome_rss import ITHomeRSS
 from .api.zaobao_api import ZaobaoAPI
+from .api.history_api import HistoryAPI
+from .api.duji_api import DujiAPI
 
 
 @register("astrbot_plugin_zhenxunribao", "Huahuatgc", "小真寻记者为你献上今日报道！", "1.2.0", "https://github.com/Huahuatgc/astrbot_plugin_zhenxunribao")
@@ -38,11 +38,11 @@ class ZhenxunReportPlugin(Star):
 
         api_token = config.get("api_token", "")
         self.bgm_api = BGMAPI(session=self.http_session)
-        self.bilibili_api = BilibiliAPI(session=self.http_session)
         self.hitokoto_api = HitokotoAPI(token=api_token, session=self.http_session)
         self.holiday_api = HolidayAPI(token=api_token, session=self.http_session)
-        self.ithome_rss = ITHomeRSS(session=self.http_session)
         self.zaobao_api = ZaobaoAPI(token=api_token, session=self.http_session)
+        self.history_api = HistoryAPI(token=api_token, session=self.http_session)
+        self.duji_api = DujiAPI(session=self.http_session)
 
         self.push_task = None
         
@@ -85,11 +85,11 @@ class ZhenxunReportPlugin(Star):
     def _reinit_api_sessions(self):
         """重新初始化 API 客户端的 session"""
         self.bgm_api.set_session(self.http_session)
-        self.bilibili_api.set_session(self.http_session)
         self.hitokoto_api.set_session(self.http_session)
         self.holiday_api.set_session(self.http_session)
-        self.ithome_rss.set_session(self.http_session)
         self.zaobao_api.set_session(self.http_session)
+        self.history_api.set_session(self.http_session)
+        self.duji_api.set_session(self.http_session)
 
     @filter.command("日报")
     async def daily_news(self, event: AstrMessageEvent):
@@ -136,37 +136,37 @@ class ZhenxunReportPlugin(Star):
         logger.info("开始生成日报")
 
         max_anime_count = self.config.get("max_anime_count", 4)
-        max_news_count = self.config.get("max_news_count", 5)
-        max_hotword_count = self.config.get("max_hotword_count", 4)
+        max_news_count = self.config.get("max_news_count", 8)
         max_holiday_count = self.config.get("max_holiday_count", 3)
+        max_history_count = self.config.get("max_history_count", 4)
 
         date_info = get_current_date_info()
 
-        anime_list, bili_hotwords, hitokoto_data, moyu_list, world_news, it_news = (
+        anime_list, hitokoto_data, moyu_list, world_news, history_events, duji_text = (
             await self._fetch_all_data(
                 max_anime_count=max_anime_count,
                 max_news_count=max_news_count,
-                max_hotword_count=max_hotword_count,
                 max_holiday_count=max_holiday_count,
+                max_history_count=max_history_count,
             )
         )
 
         template_data = {
             "date_info": date_info,
             "anime_list": anime_list or [],
-            "bili_hotwords": bili_hotwords or [],
             "hitokoto_data": hitokoto_data or {"hitokoto": "暂无", "from": "未知"},
             "moyu_list": moyu_list or [],
             "world_news": world_news or [],
-            "it_news": it_news or [],
+            "history_events": history_events or [],
+            "duji_text": duji_text or "今天也要加油哦！",
+            "quote_mode": self.config.get("quote_mode", "hitokoto"),
         }
 
         logger.info(
             f"模板数据准备完成: 新番={len(template_data['anime_list'])}, "
-            f"热点={len(template_data['bili_hotwords'])}, "
             f"节假日={len(template_data['moyu_list'])}, "
             f"世界新闻={len(template_data['world_news'])}, "
-            f"IT新闻={len(template_data['it_news'])}"
+            f"历史事件={len(template_data['history_events'])}"
         )
 
         try:
@@ -198,29 +198,39 @@ html, body {
         self,
         max_anime_count: int,
         max_news_count: int,
-        max_hotword_count: int,
         max_holiday_count: int,
+        max_history_count: int,
     ):
         results = await asyncio.gather(
             self.bgm_api.get_today_anime_async(max_count=max_anime_count),
-            self.bilibili_api.get_hotwords_async(max_count=max_hotword_count),
             self.hitokoto_api.get_hitokoto_async(),
             self.holiday_api.get_moyu_list_async(max_count=max_holiday_count),
             self.zaobao_api.get_world_news_async(max_count=max_news_count),
-            self.ithome_rss.get_it_news_async(max_count=max_news_count),
+            self.history_api.get_today_history_async(max_count=max_history_count),
+            self.duji_api.get_today_duji_async(),
             return_exceptions=True,
         )
 
         anime_list = results[0] if not isinstance(results[0], Exception) else []
-        bili_hotwords = results[1] if not isinstance(results[1], Exception) else []
         hitokoto_data = (
-            results[2]
-            if not isinstance(results[2], Exception)
+            results[1]
+            if not isinstance(results[1], Exception)
             else {"hitokoto": "暂无", "from": "未知"}
         )
-        moyu_list = results[3] if not isinstance(results[3], Exception) else []
-        world_news = results[4] if not isinstance(results[4], Exception) else []
-        it_news = results[5] if not isinstance(results[5], Exception) else []
+        moyu_list = results[2] if not isinstance(results[2], Exception) else []
+        world_news = results[3] if not isinstance(results[3], Exception) else []
+        history_events = results[4] if not isinstance(results[4], Exception) else []
+        duji_text = results[5] if not isinstance(results[5], Exception) else "今天也要加油哦！"
+
+        # 详细日志输出 - 用于调试
+        logger.info(f"========== 获取到的原始数据 ==========")
+        logger.info(f"新番数据 (anime_list): {anime_list}")
+        logger.info(f"今日一言 (hitokoto_data): {hitokoto_data}")
+        logger.info(f"节假日 (moyu_list): {moyu_list}")
+        logger.info(f"世界新闻 (world_news): {world_news}")
+        logger.info(f"历史事件 (history_events): {history_events}")
+        logger.info(f"毒鸡汤 (duji_text): {duji_text}")
+        logger.info(f"=====================================")
 
         if isinstance(hitokoto_data, dict):
             from_value = hitokoto_data.get("from", "未知")
@@ -233,7 +243,7 @@ html, body {
             if isinstance(result, Exception):
                 logger.warning(f"获取数据时出错 (索引 {i}): {result}")
 
-        return anime_list, bili_hotwords, hitokoto_data, moyu_list, world_news, it_news
+        return anime_list, hitokoto_data, moyu_list, world_news, history_events, duji_text
 
     def _file_to_base64(self, file_path: str) -> str | None:
         try:

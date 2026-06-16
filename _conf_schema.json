@@ -1,6 +1,6 @@
 {
   "api_token": {
-    "description": "ALAPI Token (用于节假日、今日一言、早报API)",
+    "description": "ALAPI Token (用于节假日、今日一言、早报、历史上的今天API)",
     "type": "string",
     "hint": "在 https://www.alapi.cn/ 注册获取Token",
     "obvious_hint": true,
@@ -13,22 +13,28 @@
     "default": 4
   },
   "max_news_count": {
-    "description": "新闻最大显示数量",
+    "description": "60s读懂世界最大显示数量",
     "type": "int",
-    "hint": "建议设置为5-10之间",
-    "default": 5
-  },
-  "max_hotword_count": {
-    "description": "B站热点最大显示数量",
-    "type": "int",
-    "hint": "建议设置为4-8之间",
-    "default": 4
+    "hint": "建议设置为5-15之间",
+    "default": 10
   },
   "max_holiday_count": {
     "description": "摸鱼日历最大显示数量",
     "type": "int",
-    "hint": "建议设置为3-5之间",
-    "default": 3
+    "hint": "建议设置为3-10之间",
+    "default": 5
+  },
+  "max_history_count": {
+    "description": "历史上的今天最大显示数量",
+    "type": "int",
+    "hint": "建议设置为5-15之间",
+    "default": 8
+  },
+  "quote_mode": {
+    "description": "底栏引用模式",
+    "type": "string",
+    "hint": "选择 hitokoto (今日一言) 或 duji (毒鸡汤)",
+    "default": "hitokoto"
   },
   "render_dpr": {
     "description": "渲染清晰度（DPR）",
