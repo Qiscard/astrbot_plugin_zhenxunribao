@@ -286,11 +286,12 @@ body {
 }
 
 .history-year {
-  min-width: 36px;
-  flex: 0 0 36px;
+  min-width: 48px;
+  flex: 0 0 48px;
   color: var(--text-accent);
   font-weight: 700;
   font-size: 11px;
+  white-space: nowrap;
 }
 
 .section-panel {
@@ -433,6 +434,8 @@ body {
                             <span class="holiday-days">{{ item.days_left }}</span>
                             <span>天</span>
                         </div>
+                        {% else %}
+                        <div class="moyu-item"><span>暂未获取到节假日数据</span></div>
                         {% endfor %}
                     </div>
                 </div>
@@ -445,6 +448,8 @@ body {
                             <span class="history-year">{{ event.year }}年</span>
                             <span>{{ event.title }}</span>
                         </div>
+                        {% else %}
+                        <div class="history-item"><span>暂未获取到历史事件数据</span></div>
                         {% endfor %}
                     </div>
                 </div>
@@ -458,6 +463,8 @@ body {
                         <img src="{{ anime.image }}" class="anime-img" alt="{{ anime.title }}" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'84\' height=\'126\'%3E%3Crect fill=\'%23e5aabe\' width=\'84\' height=\'126\'/%3E%3Ctext x=\'50%25\' y=\'50%25\' text-anchor=\'middle\' dy=\'.3em\' fill=\'white\' font-size=\'12\'%3E图片%3C/text%3E%3C/svg%3E'">
                         <p class="anime-text">{{ anime.title }}</p>
                     </div>
+                    {% else %}
+                    <p class="anime-text">今日暂无新番数据</p>
                     {% endfor %}
                 </div>
             </div>
@@ -467,6 +474,8 @@ body {
                 <ul class="news-list">
                     {% for news in world_news %}
                     <li>{{ news }}</li>
+                    {% else %}
+                    <li>暂未获取到新闻数据，请稍后再试</li>
                     {% endfor %}
                 </ul>
             </div>

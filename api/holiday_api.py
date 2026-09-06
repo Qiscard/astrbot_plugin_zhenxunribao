@@ -14,17 +14,23 @@ from .base_api import BaseAPI
 class HolidayAPI(BaseAPI):
     """节假日 API 处理类"""
 
-    def __init__(self, token: str, session: Optional[aiohttp.ClientSession] = None, year: Optional[int] = None):
+    def __init__(
+        self,
+        session: Optional[aiohttp.ClientSession] = None,
+        year: Optional[int] = None,
+        token: str = "",
+    ):
         """
         初始化
 
         Args:
-            token: ALAPI token（备用 API，可选）
             session: 可选的 aiohttp.ClientSession，如果提供则复用
             year: 指定年份，None 则使用当前年份
+            token: ALAPI Token，用于备用接口，可从插件配置注入
         """
         super().__init__(session)
-        self.token = token
+        # Token 来自插件配置（api_token），为空则跳过备用接口
+        self.token = token or ""
         # 使用 tangdouz 免费节日倒计时 API
         self.url = "https://api.tangdouz.com/nlholiday.php"
         # 备用 API（ALAPI）
@@ -60,13 +66,13 @@ class HolidayAPI(BaseAPI):
     async def _fetch_from_tangdouz(self) -> Optional[Dict]:
         """从 tangdouz 免费 API 获取节假日倒计时"""
         try:
-            session = await self._get_session()
             params = {"return": "json"}
-            async with session.get(
+            async with await self._request_with_retry(
+                "GET",
                 self.url,
                 headers=self.headers,
                 params=params,
-                timeout=aiohttp.ClientTimeout(total=10)
+                timeout=aiohttp.ClientTimeout(total=10),
             ) as response:
                 response.raise_for_status()
                 # 使用 text() 然后手动解析 JSON，避免 MIME 类型检查问题
@@ -96,13 +102,13 @@ class HolidayAPI(BaseAPI):
     async def _fetch_from_alapi(self) -> Optional[Dict]:
         """从 ALAPI 备用接口获取节假日"""
         try:
-            session = await self._get_session()
             params = {"token": self.token}
-            async with session.get(
+            async with await self._request_with_retry(
+                "GET",
                 self.backup_url,
                 headers={"Content-Type": "application/json"},
                 params=params,
-                timeout=aiohttp.ClientTimeout(total=10)
+                timeout=aiohttp.ClientTimeout(total=10),
             ) as response:
                 response.raise_for_status()
                 data = await response.json()
@@ -130,10 +136,11 @@ class HolidayAPI(BaseAPI):
                 {'name': '清明节', 'days_left': 78},
                 ...
             ]
+            数据不可用时返回空列表（由模板显示占位文案）
         """
         if not api_data:
-            logger.warning("节假日 API 数据为空，使用默认数据")
-            return self._get_default_holidays()
+            logger.warning("节假日 API 数据为空")
+            return []
 
         try:
             # 提取数据
@@ -141,8 +148,8 @@ class HolidayAPI(BaseAPI):
             logger.debug(f"解析节假日数据，原始数据长度: {len(holidays_data) if isinstance(holidays_data, list) else 'N/A'}")
 
             if not isinstance(holidays_data, list) or len(holidays_data) == 0:
-                logger.warning("节假日数据列表为空，使用默认数据")
-                return self._get_default_holidays()
+                logger.warning("节假日数据列表为空")
+                return []
 
             # tangdouz API 已经处理好格式，直接使用
             # 数据格式: [{'name': '端午节', 'days_left': 3}, ...]
@@ -150,39 +157,21 @@ class HolidayAPI(BaseAPI):
 
             logger.debug(f"解析后的节假日: {result}")
 
-            # 如果没有数据，返回默认值
-            if len(result) == 0:
-                logger.warning("未找到节假日数据，使用默认数据")
-                return self._get_default_holidays()
-
             return result
 
         except Exception as e:
             logger.error(f"解析节假日数据时出错: {e}", exc_info=True)
-            return self._get_default_holidays()
-    
-    def _get_default_holidays(self) -> List[Dict]:
-        """
-        返回默认的节假日数据（当 API 失败时使用）
-        
-        Returns:
-            默认节假日列表
-        """
-        return [
-            {'name': '周末', 'days_left': 3},
-            {'name': '春节', 'days_left': 25},
-            {'name': '清明节', 'days_left': 78}
-        ]
-    
+            return []
+
     async def get_moyu_list_async(self, max_count: int = 3) -> List[Dict]:
         """
         异步方式获取摸鱼日历数据（推荐用于 AstrBot）
-        
+
         Args:
             max_count: 最多返回几个节假日
-            
+
         Returns:
-            格式化的摸鱼日历列表
+            格式化的摸鱼日历列表，数据不可用时返回空列表
         """
         api_data = await self.get_holidays_async()
         return self.parse_holidays(api_data, max_count)

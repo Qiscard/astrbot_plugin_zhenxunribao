@@ -54,11 +54,11 @@ class BGMAPI(BaseAPI):
     async def _fetch_from_proxy(self) -> Optional[List]:
         """从反代 API 获取数据"""
         try:
-            session = await self._get_session()
-            async with session.get(
+            async with await self._request_with_retry(
+                "GET",
                 self.url,
                 headers=self.headers,
-                timeout=aiohttp.ClientTimeout(total=15)
+                timeout=aiohttp.ClientTimeout(total=15),
             ) as response:
                 response.raise_for_status()
                 data = await response.json()
@@ -71,11 +71,11 @@ class BGMAPI(BaseAPI):
     async def _fetch_from_official(self) -> Optional[List]:
         """从官方 API 获取数据（备用）"""
         try:
-            session = await self._get_session()
-            async with session.get(
+            async with await self._request_with_retry(
+                "GET",
                 self.backup_url,
                 headers=self.headers,
-                timeout=aiohttp.ClientTimeout(total=15)
+                timeout=aiohttp.ClientTimeout(total=15),
             ) as response:
                 response.raise_for_status()
                 data = await response.json()
@@ -104,8 +104,8 @@ class BGMAPI(BaseAPI):
             ]
         """
         if not api_data or not isinstance(api_data, list):
-            logger.warning("BGM API 数据为空或格式错误，使用默认数据")
-            return self._get_default_anime()
+            logger.warning("BGM API 数据为空或格式错误")
+            return []
 
         try:
             # 获取今天是星期几 (0=周一, 6=周日)
@@ -160,41 +160,27 @@ class BGMAPI(BaseAPI):
 
                     break
 
-            # 如果没有找到数据，返回默认值
+            # 如果没有找到数据，返回空列表（由模板显示占位文案）
             if len(anime_list) == 0:
-                logger.warning("未找到今日新番数据，使用默认数据")
-                return self._get_default_anime()
+                logger.warning("未找到今日新番数据")
+                return []
 
             logger.debug(f"成功解析 {len(anime_list)} 部新番")
             return anime_list
 
         except Exception as e:
             logger.error(f"解析 BGM 数据时出错: {e}", exc_info=True)
-            return self._get_default_anime()
-    
-    def _get_default_anime(self) -> List[Dict]:
-        """
-        返回默认的新番数据（当 API 失败时使用）
-        
-        Returns:
-            默认新番列表
-        """
-        return [
-            {'title': '葬送的芙莉莲 第二季', 'image': './res/image/anime1.jpg'},
-            {'title': '咒术回战 涉谷事变篇', 'image': './res/image/anime2.jpg'},
-            {'title': '间谍过家家 第三季', 'image': './res/image/anime3.jpg'},
-            {'title': '鬼灭之刃 柱训练篇', 'image': './res/image/anime4.jpg'}
-        ]
-    
+            return []
+
     async def get_today_anime_async(self, max_count: int = 4) -> List[Dict]:
         """
         异步方式获取今日新番数据（推荐用于 AstrBot）
-        
+
         Args:
             max_count: 最多返回几个新番
-            
+
         Returns:
-            格式化的今日新番列表
+            格式化的今日新番列表，数据不可用时返回空列表
         """
         api_data = await self.get_calendar_async()
         return self.parse_today_anime(api_data, max_count)

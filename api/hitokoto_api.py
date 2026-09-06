@@ -12,28 +12,30 @@ from .base_api import BaseAPI
 class HitokotoAPI(BaseAPI):
     """今日一言 API 处理类"""
 
-    def __init__(self, token: str, session: Optional[aiohttp.ClientSession] = None):
+    def __init__(self, session: Optional[aiohttp.ClientSession] = None, token: str = ""):
         """
         初始化
 
         Args:
-            token: API token (已弃用，保留参数兼容性)
             session: 可选的 aiohttp.ClientSession，如果提供则复用
+            token: ALAPI Token，用于备用接口，可从插件配置注入
         """
         super().__init__(session)
         # 使用官方免费 API，无需 Token
         self.url = "https://v1.hitokoto.cn/"
         # 备用 API（ALAPI，仅在官方 API 失败时使用）
         self.backup_url = "https://v3.alapi.cn/api/hitokoto"
-        self.token = token
+        # Token 来自插件配置（api_token），为空则跳过备用接口
+        self.token = token or ""
         self.headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         }
 
     def _get_default_hitokoto(self) -> Dict[str, str]:
+        # Neutral placeholder instead of a fabricated quote when APIs fail
         return {
-            'hitokoto': '生活就像骑自行车，想保持平衡就得往前走。',
-            'from': '未知'
+            'hitokoto': '暂无一言',
+            'from': '佚名'
         }
 
     async def get_hitokoto_async(self) -> Dict[str, str]:
@@ -62,11 +64,11 @@ class HitokotoAPI(BaseAPI):
     async def _fetch_from_official(self) -> Optional[Dict[str, str]]:
         """从官方 API 获取一言"""
         try:
-            session = await self._get_session()
-            async with session.get(
+            async with await self._request_with_retry(
+                "GET",
                 self.url,
                 headers=self.headers,
-                timeout=aiohttp.ClientTimeout(total=10)
+                timeout=aiohttp.ClientTimeout(total=10),
             ) as response:
                 response.raise_for_status()
                 data = await response.json()
@@ -95,13 +97,13 @@ class HitokotoAPI(BaseAPI):
     async def _fetch_from_alapi(self) -> Optional[Dict[str, str]]:
         """从 ALAPI 备用接口获取一言"""
         try:
-            session = await self._get_session()
             params = {"token": self.token}
-            async with session.get(
+            async with await self._request_with_retry(
+                "GET",
                 self.backup_url,
                 headers={"Content-Type": "application/json"},
                 params=params,
-                timeout=aiohttp.ClientTimeout(total=10)
+                timeout=aiohttp.ClientTimeout(total=10),
             ) as response:
                 response.raise_for_status()
                 data = await response.json()

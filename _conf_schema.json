@@ -1,9 +1,8 @@
 {
   "api_token": {
-    "description": "ALAPI Token (用于节假日、今日一言、早报、历史上的今天API)",
+    "description": "ALAPI Token（可选）",
     "type": "string",
-    "hint": "在 https://www.alapi.cn/ 注册获取Token",
-    "obvious_hint": true,
+    "hint": "用于 60s读懂世界、历史上的今天 等接口的备用/主数据源；在 https://admin.alapi.cn/user/login 注册后获取。留空时仅使用免费数据源，部分板块可能无数据",
     "default": ""
   },
   "max_anime_count": {

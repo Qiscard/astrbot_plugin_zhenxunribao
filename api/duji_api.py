@@ -34,11 +34,11 @@ class DujiAPI(BaseAPI):
             毒鸡汤文本，失败返回 None
         """
         try:
-            session = await self._get_session()
-            async with session.get(
+            async with await self._request_with_retry(
+                "GET",
                 self.url,
                 headers=self.headers,
-                timeout=aiohttp.ClientTimeout(total=10)
+                timeout=aiohttp.ClientTimeout(total=10),
             ) as response:
                 response.raise_for_status()
                 text = await response.text()
@@ -71,12 +71,12 @@ class DujiAPI(BaseAPI):
 
     def _get_default_duji(self) -> str:
         """
-        返回默认的毒鸡汤（当 API 失败时使用）
+        返回占位文案（当 API 失败时使用）
 
         Returns:
-            默认毒鸡汤
+            中性占位文案（不伪造真实内容）
         """
-        return "靠运气赚来的钱，最终都会凭实力赔走，直到财富与认知匹配为止。"
+        return "今天也要加油哦！"
 
     async def get_today_duji_async(self) -> str:
         """
