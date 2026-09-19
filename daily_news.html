@@ -247,6 +247,15 @@ body {
   color: var(--text-accent);
 }
 
+.moyu-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
+  color: var(--text-soft);
+  font-size: 13px;
+}
+
 .history-list {
   display: flex;
   flex-direction: column;
@@ -857,11 +866,16 @@ body {
             </div>
 
             {% if moyu_rows or top_view %}
-            <div class="lead-row{% if not (moyu_rows and top_view) %} lead-row--solo{% endif %}">
-                {% if moyu_rows %}
+            {# 顶部模块始终位于摸鱼日历侧方：只要顶部有内容就保留双列，摸鱼为空时显示占位 #}
+            <div class="lead-row{% if not top_view %} lead-row--solo{% endif %}">
+                {% if moyu_rows or top_view %}
                 <div class="panel moyu-panel">
                     <div class="panel-tag"><img src="./res/icon/fish.png" alt="摸鱼" onerror="this.style.display='none'">{{ moyu_title }}</div>
+                    {% if moyu_rows %}
                     {{ timer_list(moyu_rows) }}
+                    {% else %}
+                    <div class="moyu-empty">暂无计时项</div>
+                    {% endif %}
                 </div>
                 {% endif %}
                 {% if top_view %}

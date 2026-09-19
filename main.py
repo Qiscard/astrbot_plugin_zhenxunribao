@@ -89,6 +89,14 @@ MODULE_TYPE_META = {
         "render": "aidaily",
         "has_count": True,
     },
+    "hbox": {
+        "title": "小黑盒游戏",
+        "count": 6,
+        "icon": "./res/icon/game.png",
+        "slots": ["body"],
+        "render": "hbox",
+        "has_count": True,
+    },
     "cartoon": {
         "title": "今日追番",
         "count": 6,
@@ -201,17 +209,11 @@ TOP_SOURCE_LABELS = {
     "exchange": "实时汇率",
 }
 
-# 中部模块1候选来源（单选，番剧/游戏）
-MID1_SOURCE_LABELS = {
-    "anime": "今日新番",
-    "cartoon": "今日追番",
-    "hbox": "小黑盒游戏",
-}
-
-# 中部模块2候选来源（单选，新闻/资讯）
-MID2_SOURCE_LABELS = {
-    "news": "60s读懂世界",
-    "aidaily": "AI早报",
+# 中间模块类型分类：统一「中间模块」列表在编辑器里按分类组织可选类型
+MODULE_CATEGORIES = {
+    "番剧游戏": ["anime", "cartoon", "hbox"],
+    "新闻资讯": ["news", "aidaily"],
+    "文字内容": ["english", "essay", "shici", "yulu"],
 }
 
 # modules.json 不存在时写入的默认配置
@@ -230,16 +232,6 @@ DEFAULT_MODULE_CONFIG = {
     # （history/english/exchange；history_* 字段为 history 来源的参数）
     "top_source": "history",
     "top_params": {},
-    # 中部模块1：番剧/游戏类，单选
-    "mid1_source": "anime",
-    "mid1_title": "今日新番",
-    "mid1_count": 4,
-    "mid1_params": {},
-    # 中部模块2：新闻/资讯类，单选
-    "mid2_source": "news",
-    "mid2_title": "60s读懂世界",
-    "mid2_count": 10,
-    "mid2_params": {},
     # 实时汇率参数：一个源货币，可配置多个目标货币（最多 6 个）
     "exchange_from": "USD",
     "exchange_targets": ["CNY"],
@@ -248,11 +240,10 @@ DEFAULT_MODULE_CONFIG = {
     "quote_enabled": True,
     "quote_title": "",
     "quote_sources": ["hitokoto"],
-    # 其余模块按列表顺序纵向排列
+    # 中间模块：统一列表，按顺序纵向排列（类型见 MODULE_CATEGORIES 分类）
     "modules": [
         {"type": "anime", "enabled": True, "title": "今日新番", "count": 4},
         {"type": "news", "enabled": True, "title": "60s读懂世界", "count": 10},
-        {"type": "english", "enabled": True, "title": "每日英语", "count": 1},
     ],
 }
 
@@ -582,6 +573,46 @@ class ZhenxunReportPlugin(Star):
             cfg["modules"] = []
 
         known_types = set(DEFAULT_MODULE_TITLES)
+
+        # 旧版配置迁移：中部模块1/2 固定位并入统一中间模块列表（置于最前）
+        if "mid1_source" in raw_keys or "mid2_source" in raw_keys:
+            if "modules" not in raw_keys:
+                cfg["modules"] = []
+            existing_types = {
+                m.get("type") for m in cfg["modules"] if isinstance(m, dict)
+            }
+            migrated = []
+            for prefix in ("mid1", "mid2"):
+                mtype = str(raw.get(f"{prefix}_source") or "").strip()
+                # 该类型已在 modules 列表（或前一个槽位已迁移）时不重复迁移
+                if mtype not in known_types or mtype in existing_types:
+                    continue
+                entry = {"type": mtype, "enabled": True}
+                entry["title"] = (
+                    str(raw.get(f"{prefix}_title") or "").strip()
+                    or DEFAULT_MODULE_TITLES[mtype]
+                )
+                try:
+                    count = int(raw.get(f"{prefix}_count") or 0)
+                except (TypeError, ValueError):
+                    count = 0
+                if count >= 1:
+                    entry["count"] = count
+                params = raw.get(f"{prefix}_params")
+                if isinstance(params, dict) and params:
+                    entry["params"] = copy.deepcopy(params)
+                migrated.append(entry)
+                existing_types.add(mtype)
+            cfg["modules"] = migrated + list(cfg["modules"])
+            for prefix in ("mid1", "mid2"):
+                for key in (
+                    f"{prefix}_source",
+                    f"{prefix}_title",
+                    f"{prefix}_count",
+                    f"{prefix}_params",
+                ):
+                    cfg.pop(key, None)
+
         valid_modules = []
         for raw_module in cfg["modules"]:
             if not isinstance(raw_module, dict):
@@ -671,8 +702,7 @@ class ZhenxunReportPlugin(Star):
         except (TypeError, ValueError):
             cfg["history_count"] = 4
 
-        # ---- 四个固定模块位：单选来源校验 ----
-        # 顶部模块（历史/英语/汇率）
+        # ---- 顶部模块位：单选来源校验 ----
         if cfg.get("top_source") not in TOP_SOURCE_LABELS:
             # 旧版配置迁移：未设置 top_source 但启用了历史面板 → 沿用历史
             cfg["top_source"] = "history"
@@ -682,28 +712,6 @@ class ZhenxunReportPlugin(Star):
         if cfg["top_source"] != "history":
             # 选择了英语/汇率来源时，顶部展示新来源而非历史面板
             cfg["history_enabled"] = False
-        # 中部模块1（番剧/游戏）
-        if cfg.get("mid1_source") not in MID1_SOURCE_LABELS:
-            cfg["mid1_source"] = "anime"
-        cfg["mid1_title"] = str(cfg.get("mid1_title") or MID1_SOURCE_LABELS[cfg["mid1_source"]])
-        try:
-            cfg["mid1_count"] = max(1, min(int(cfg.get("mid1_count", 4)), 12))
-        except (TypeError, ValueError):
-            cfg["mid1_count"] = 4
-        cfg["mid1_params"] = self._normalize_module_params(
-            cfg["mid1_source"], cfg.get("mid1_params")
-        )
-        # 中部模块2（新闻/资讯）
-        if cfg.get("mid2_source") not in MID2_SOURCE_LABELS:
-            cfg["mid2_source"] = "news"
-        cfg["mid2_title"] = str(cfg.get("mid2_title") or MID2_SOURCE_LABELS[cfg["mid2_source"]])
-        try:
-            cfg["mid2_count"] = max(1, min(int(cfg.get("mid2_count", 10)), 30))
-        except (TypeError, ValueError):
-            cfg["mid2_count"] = 10
-        cfg["mid2_params"] = self._normalize_module_params(
-            cfg["mid2_source"], cfg.get("mid2_params")
-        )
         # 实时汇率参数：一个源货币 + 多个目标货币
         cfg["exchange_from"] = (
             str(cfg.get("exchange_from") or "USD").strip().upper()[:3] or "USD"
@@ -811,17 +819,16 @@ class ZhenxunReportPlugin(Star):
         return json_response(self._load_module_config())
 
     async def api_get_meta(self):
-        """返回编辑器所需的模块元数据：类型、图标、接口参数 schema、短句来源、
-        以及四个固定模块位的候选来源（顶部/中部1/中部2/底部）。"""
+        """返回编辑器所需的模块元数据：类型、分类、图标、接口参数 schema、短句来源，
+        以及顶部模块位的候选来源。"""
         return json_response(
             {
                 "module_types": MODULE_TYPE_META,
+                "module_categories": MODULE_CATEGORIES,
                 "icons": MODULE_ICONS,
                 "param_schema": MODULE_PARAM_SCHEMA,
                 "quote_sources": QUOTE_SOURCE_LABELS,
                 "top_sources": TOP_SOURCE_LABELS,
-                "mid1_sources": MID1_SOURCE_LABELS,
-                "mid2_sources": MID2_SOURCE_LABELS,
             }
         )
 
@@ -1128,93 +1135,7 @@ html, body {
             source = random.choice(module_cfg["quote_sources"])
             tasks.append(("quote", None, self._fetch_quote_text(source)))
 
-        # ---- 中部模块1：番剧/游戏类（单选） ----
-        # 旧版 modules 列表里若已有同类型模块，会被下方 free modules 分支重复抓取；
-        # 为避免重复，先记录中部固定模块位占用的类型，后续 free modules 跳过它们。
-        mid1_source = module_cfg.get("mid1_source")
-        mid2_source = module_cfg.get("mid2_source")
-        fixed_kinds = {k for k in (mid1_source, mid2_source) if k}
-
-        if mid1_source == "anime":
-            mid1_module = {
-                "type": "anime",
-                "title": module_cfg["mid1_title"],
-                "count": module_cfg["mid1_count"],
-                "params": module_cfg["mid1_params"],
-            }
-            tasks.append(
-                (
-                    "anime",
-                    mid1_module,
-                    self.bgm_api.get_today_anime_async(max_count=module_cfg["mid1_count"]),
-                )
-            )
-        if mid1_source == "cartoon":
-            mid1_module = {
-                "type": "cartoon",
-                "title": module_cfg["mid1_title"],
-                "count": module_cfg["mid1_count"],
-                "params": module_cfg["mid1_params"],
-            }
-            tasks.append(
-                (
-                    "cartoon",
-                    mid1_module,
-                    self.xiaoapi_api.get_cartoon_updates(
-                        date_str=module_cfg["mid1_params"].get("date", "")
-                    ),
-                )
-            )
-        elif mid1_source == "hbox":
-            mid1_module = {
-                "type": "hbox",
-                "title": module_cfg["mid1_title"],
-                "count": module_cfg["mid1_count"],
-                "params": module_cfg["mid1_params"],
-            }
-            tasks.append(
-                (
-                    "hbox",
-                    mid1_module,
-                    self.tangdouz_api.get_hot_games(max_count=module_cfg["mid1_count"]),
-                )
-            )
-
-        # ---- 中部模块2：新闻/资讯类（单选） ----
-        if mid2_source == "news":
-            tasks.append(
-                (
-                    "news",
-                    {"title": module_cfg["mid2_title"], "count": module_cfg["mid2_count"]},
-                    self.zaobao_api.get_world_news_async(max_count=module_cfg["mid2_count"]),
-                )
-            )
-        elif mid2_source == "aidaily":
-            mid2_module = {
-                "type": "aidaily",
-                "title": module_cfg["mid2_title"],
-                "count": module_cfg["mid2_count"],
-                "params": module_cfg["mid2_params"],
-            }
-            tasks.append(
-                (
-                    "aidaily",
-                    mid2_module,
-                    self.milora_api.get_aidaily(
-                        max_count=module_cfg["mid2_count"],
-                        rtype=module_cfg["mid2_params"].get("type", ""),
-                        date=module_cfg["mid2_params"].get("date", ""),
-                    ),
-                )
-            )
-
-        # free modules（旧版可排序模块列表）——跳过已被中部固定模块位占用的类型
-        modules = [
-            m
-            for m in modules
-            if m["type"] not in fixed_kinds
-            and not (module_cfg.get("top_source") == m["type"])
-        ]
+        # ---- 中间模块：统一列表，按顺序并发抓取 ----
         for m in modules:
             mtype = m["type"]
             if mtype == "anime":
@@ -1260,6 +1181,14 @@ html, body {
                             rtype=params.get("type", ""),
                             date=params.get("date", ""),
                         ),
+                    )
+                )
+            elif mtype == "hbox":
+                tasks.append(
+                    (
+                        "hbox",
+                        m,
+                        self.tangdouz_api.get_hot_games(max_count=m["count"]),
                     )
                 )
             elif mtype == "cartoon":
@@ -1316,33 +1245,11 @@ html, body {
                     exchange_rows.append(res)
             elif kind == "quote":
                 quote_data = res
-            elif kind in ("anime", "cartoon", "hbox", "news", "aidaily") and kind in (
-                module_cfg.get("mid1_source"),
-                module_cfg.get("mid2_source"),
-            ):
-                # 中部固定模块位的数据直接当作 module_views（标题来自配置）
-                data = res
+            else:
+                data = res if res is not None else []
                 if kind == "hbox":
                     data = (res or {}).get("games") if isinstance(res, dict) else None
                 elif kind == "cartoon" and isinstance(data, dict):
-                    data["items"] = (data.get("items") or [])[: max(1, int(m.get("count", 6)))]
-                if data:
-                    module_views.append(
-                        {
-                            "type": kind,
-                            "title": (
-                                module_cfg["mid1_title"]
-                                if kind == module_cfg.get("mid1_source")
-                                else module_cfg["mid2_title"]
-                            ),
-                            "data": data,
-                        }
-                    )
-                else:
-                    logger.warning(f"中部模块 {kind} 无数据，本次跳过")
-            else:
-                data = res if res is not None else []
-                if kind == "cartoon" and isinstance(data, dict):
                     data["items"] = (data.get("items") or [])[: max(1, int(m.get("count", 6)))]
                 elif kind in ("essay", "shici", "yulu") and isinstance(data, dict):
                     data = [data]

@@ -9,6 +9,7 @@
     english: { label: "每日英语", hasCount: true, def: 1 },
     essay: { label: "每日一文", hasCount: true, def: 1 },
     aidaily: { label: "AI早报", hasCount: true, def: 10 },
+    hbox: { label: "小黑盒游戏", hasCount: true, def: 6 },
     cartoon: { label: "今日追番", hasCount: true, def: 6 },
     shici: { label: "每日诗词", hasCount: true, def: 1 },
     yulu: { label: "语录", hasCount: true, def: 1 },
@@ -49,17 +50,23 @@
     moyu_title: "摸鱼日历", moyu_items: [], history_enabled: true,
     history_title: "历史上的今天", history_count: 4,
     top_source: "history",
-    mid1_source: "anime", mid1_title: "今日新番", mid1_count: 4, mid1_params: {},
-    mid2_source: "news", mid2_title: "60s读懂世界", mid2_count: 10, mid2_params: {},
     exchange_from: "USD", exchange_targets: ["CNY"], exchange_amount: 100,
     quote_enabled: true, quote_title: "", quote_sources: ["hitokoto"], modules: [],
   };
-  // 顶部/中部1/中部2 候选来源（后端 meta 会覆盖；此处为离线兜底）
+  // 顶部候选来源（后端 meta 会覆盖；此处为离线兜底）
   var TOP_SOURCES = { history: "历史上的今天", english: "每日英语", exchange: "实时汇率" };
-  var MID1_SOURCES = { anime: "今日新番", cartoon: "今日追番", hbox: "小黑盒游戏" };
-  var MID2_SOURCES = { news: "60s读懂世界", aidaily: "AI早报" };
-  // 固定模块位的中文名，用于弹窗标题与外观标签
-  var SLOT_LABELS = { mid1: "中部模块1 · 番剧游戏", mid2: "中部模块2 · 新闻资讯" };
+  // 中间模块类型分类（后端 meta 会覆盖；此处为离线兜底）
+  var MODULE_CATEGORIES = {
+    "番剧游戏": ["anime", "cartoon", "hbox"],
+    "新闻资讯": ["news", "aidaily"],
+    "文字内容": ["english", "essay", "shici", "yulu"],
+  };
+  function categoryOfType(type) {
+    for (var cat in MODULE_CATEGORIES) {
+      if (MODULE_CATEGORIES[cat].indexOf(type) !== -1) return cat;
+    }
+    return "其他";
+  }
   var bridge = null;
 
   function unwrap(r) {
@@ -187,7 +194,12 @@
       ]),
     ]);
 
-    var lead = el("div", { class: "dp-lead" + (s.top_source === "history" && s.history_enabled ? "" : " solo") });
+    // 顶部面板是否可见（与后端一致：汇率无目标货币时不渲染面板）
+    var hasTop =
+      (s.top_source === "history" && s.history_enabled) ||
+      s.top_source === "english" ||
+      (s.top_source === "exchange" && (s.exchange_targets || []).length > 0);
+    var lead = el("div", { class: "dp-lead" + (hasTop ? "" : " solo") });
 
     var moyuItems = (s.moyu_items || []).map(function (it) {
       var type = it.type || (it.date ? "custom" : "holiday");
@@ -203,6 +215,7 @@
     if (!moyuItems.length) {
       moyuItems = [el("div", { class: "muted", text: "（暂无计时项，点击添加）" })];
     }
+    // 摸鱼日历固定在左侧；为空时显示占位，保证顶部模块保持在侧方位置
     lead.appendChild(panel(s.moyu_title || "摸鱼日历", [el("div", { class: "dp-list" }, moyuItems)], {
       onclick: function (e) { e.stopPropagation(); openModal({ kind: "moyu" }); },
     }));
@@ -228,9 +241,8 @@
       ], {
         onclick: function (e) { e.stopPropagation(); openModal({ kind: "top" }); },
       }));
-    } else if (s.top_source === "exchange") {
-      var targets = (s.exchange_targets || []).length ? s.exchange_targets : ["CNY"];
-      var exKids = targets.map(function (t) {
+    } else if (hasTop && s.top_source === "exchange") {
+      var exKids = (s.exchange_targets || []).map(function (t) {
         return el("div", {}, [
           el("div", { class: "dp-exchange" }, [
             el("span", { class: "dp-ex-amt", text: s.exchange_amount + " " + s.exchange_from }),
@@ -240,7 +252,6 @@
           el("div", { class: "muted", text: "参考汇率 1 " + s.exchange_from + " = X.XXXX " + t }),
         ]);
       });
-      if (!exKids.length) exKids = [el("div", { class: "muted", text: "（未选择目标货币）" })];
       lead.appendChild(panel("实时汇率", exKids, {
         onclick: function (e) { e.stopPropagation(); openModal({ kind: "top" }); },
       }));
@@ -248,46 +259,9 @@
 
     var body = el("div", { class: "dp-body" });
 
-    // ---- 中部模块1：番剧/游戏类（固定面板，单选） ----
-    var mid1Body = null;
-    if (s.mid1_source === "anime") {
-      mid1Body = el("div", { class: "dp-anime" }, rep(Math.max(1, s.mid1_count || 4), function () {
-        return el("div", { class: "card" }, [el("div", { class: "cover", text: "封面" }), el("p", { text: PH.anime })]);
-      }));
-    } else if (s.mid1_source === "cartoon") {
-      mid1Body = el("ul", { class: "dp-news" }, rep(Math.max(1, s.mid1_count || 6), function (i) {
-        return el("li", { text: "{{番剧标题}} " + (i + 1) + "  {{更新时间}}" });
-      }));
-    } else if (s.mid1_source === "hbox") {
-      mid1Body = el("div", { class: "dp-anime" }, rep(Math.max(1, s.mid1_count || 4), function () {
-        return el("div", { class: "card" }, [el("div", { class: "cover", text: "游戏封面" }), el("p", { text: "{{游戏名}}" })]);
-      }));
+    if (!s.modules.length) {
+      body.appendChild(el("div", { class: "muted", text: "（中间模块为空，点击下方按钮添加）" }));
     }
-    if (mid1Body) {
-      body.appendChild(panel(s.mid1_title || MID1_SOURCES[s.mid1_source], [mid1Body], {
-        sub: "固定位 · 中部模块1（番剧 / 游戏）",
-        onclick: function (e) { e.stopPropagation(); openModal({ kind: "mid1" }); },
-      }));
-    }
-
-    // ---- 中部模块2：新闻/资讯类（固定面板，单选） ----
-    var mid2Body = null;
-    if (s.mid2_source === "news") {
-      mid2Body = el("ul", { class: "dp-news" }, rep(Math.max(1, s.mid2_count || 6), function (i) {
-        return el("li", { text: PH.news + " " + (i + 1) });
-      }));
-    } else if (s.mid2_source === "aidaily") {
-      mid2Body = el("ul", { class: "dp-news" }, rep(Math.max(1, s.mid2_count || 6), function (i) {
-        return el("li", { text: "{{AI早报条目}} " + (i + 1) });
-      }));
-    }
-    if (mid2Body) {
-      body.appendChild(panel(s.mid2_title || MID2_SOURCES[s.mid2_source], [mid2Body], {
-        sub: "固定位 · 中部模块2（新闻 / 资讯）",
-        onclick: function (e) { e.stopPropagation(); openModal({ kind: "mid2" }); },
-      }));
-    }
-
     (s.modules || []).forEach(function (mod, idx) {
       if (mod.enabled === false) return;
       var content = [];
@@ -329,10 +303,15 @@
           el("div", { class: "dp-essay-title", text: "{{语录文本}}" }),
           el("div", { class: "dp-essay-author", text: "—— {{作者}}" }),
         ]));
+      } else if (mod.type === "hbox") {
+        content.push(el("div", { class: "dp-anime" }, rep(Math.max(1, mod.count || 4), function () {
+          return el("div", { class: "card" }, [el("div", { class: "cover", text: "游戏封面" }), el("p", { text: "{{游戏名}}" })]);
+        })));
       }
       var badge = apiBadge(mod);
       if (badge) content.push(badge);
       body.appendChild(panel(mod.title || (MODULE_TYPES[mod.type] && MODULE_TYPES[mod.type].label) || mod.type, content, {
+        sub: "中间模块 · " + categoryOfType(mod.type),
         onclick: function (e) { e.stopPropagation(); openModal({ kind: "module", index: idx }); },
         actions: [
           actionBtn("↑", function () { move(state.modules, idx, -1); saveSilent(); renderCanvas(); }),
@@ -345,7 +324,7 @@
 
     var hiddenMods = (s.modules || []).filter(function (m) { return m.enabled === false; });
     if (hiddenMods.length) {
-      body.appendChild(el("div", { class: "dp-hidden-bar" }, [el("span", { class: "hint", text: "已隐藏模块：" })].concat(
+      body.appendChild(el("div", { class: "dp-hidden-bar" }, [el("span", { class: "hint", text: "已隐藏中间模块：" })].concat(
         hiddenMods.map(function (m) {
           var hidx = s.modules.indexOf(m);
           return el("button", {
@@ -361,7 +340,7 @@
       )));
     }
     body.appendChild(el("div", {
-      class: "dp-add", text: "＋ 添加附加模块（纵向排列）",
+      class: "dp-add", text: "＋ 添加中间模块",
       onclick: function (e) { e.stopPropagation(); addModule(); },
     }));
 
@@ -411,10 +390,8 @@
     body.textContent = "";
     if (target.kind === "moyu") { title.textContent = "编辑：摸鱼日历（左上固定位）"; renderMoyuModal(body); }
     else if (target.kind === "top") { title.textContent = "编辑：顶部模块（右上固定位）"; renderTopModal(body); }
-    else if (target.kind === "mid1") { title.textContent = "编辑：" + SLOT_LABELS.mid1; renderMidModal(body, 1); }
-    else if (target.kind === "mid2") { title.textContent = "编辑：" + SLOT_LABELS.mid2; renderMidModal(body, 2); }
     else if (target.kind === "quote") { title.textContent = "编辑：底部引用（底部固定位）"; renderQuoteModal(body); }
-    else if (target.kind === "module") { title.textContent = "编辑：附加模块（纵向排列）"; renderModuleModal(body, target.index); }
+    else if (target.kind === "module") { title.textContent = "编辑：中间模块"; renderModuleModal(body, target.index); }
     document.getElementById("modal").classList.remove("hidden");
   }
   function closeModal() { document.getElementById("modal").classList.add("hidden"); }
@@ -450,13 +427,22 @@
       });
       var row = el("div", { class: "f-item" }, [sel]);
 
-      if (type === "custom" || type === "weekend") {
+      // 非节假日项字段顺序：类型 → 前缀 → 自定义内容 → 后缀 → 自定义时间
+      if (type !== "holiday") {
+        var prefix = el("input", { class: "grow narrow", value: it.prefix || "", placeholder: "距离" });
+        prefix.addEventListener("input", function () { it.prefix = prefix.value; saveSilent(); renderCanvas(); });
+        row.appendChild(prefix);
+
         var nameInput = el("input", {
           class: "grow", value: it.name || "",
-          placeholder: type === "weekend" ? "留空显示周六/周日" : "日期名称（如：元旦）",
+          placeholder: type === "weekend" ? "留空显示周六/周日" : "自定义内容（如：我的生日）",
         });
         nameInput.addEventListener("input", function () { it.name = nameInput.value; saveSilent(); renderCanvas(); });
         row.appendChild(nameInput);
+
+        var suffix = el("input", { class: "grow narrow", value: it.suffix || "", placeholder: "还剩" });
+        suffix.addEventListener("input", function () { it.suffix = suffix.value; saveSilent(); renderCanvas(); });
+        row.appendChild(suffix);
       }
       if (type === "custom") {
         var date = el("input", { class: "grow", value: it.date || "", placeholder: "YYYY-MM-DD 或 MM-DD" });
@@ -473,14 +459,6 @@
         daySel.addEventListener("change", function () { it.weekday = Number(daySel.value); saveSilent(); renderCanvas(); });
         row.appendChild(daySel);
       }
-      if (type !== "holiday") {
-        var prefix = el("input", { class: "grow narrow", value: it.prefix || "", placeholder: "距离" });
-        prefix.addEventListener("input", function () { it.prefix = prefix.value; saveSilent(); renderCanvas(); });
-        row.appendChild(prefix);
-        var suffix = el("input", { class: "grow narrow", value: it.suffix || "", placeholder: "还剩" });
-        suffix.addEventListener("input", function () { it.suffix = suffix.value; saveSilent(); renderCanvas(); });
-        row.appendChild(suffix);
-      }
       row.appendChild(el("button", {
         class: "btn btn-mini", type: "button", text: "✕",
         onclick: function () { state.moyu_items.splice(idx, 1); saveSilent(); renderCanvas(); renderMoyuModal(body); },
@@ -491,7 +469,10 @@
       list.appendChild(el("div", { class: "muted", text: "暂无计时项，点击下方按钮添加。" }));
     }
     body.appendChild(list);
-    body.appendChild(el("div", { class: "f-section-hint", text: "前段/后段文字留空时分别显示「距离」「还剩」（已过期的自定义日期显示「过了」）。" }));
+    body.appendChild(el("div", {
+      class: "f-section-hint",
+      text: "字段顺序：类型 → 前缀 → 自定义内容 → 后缀 → 自定义时间。留空时前缀显示「距离」，后缀显示「还剩」（过期日期显示「过了」）。",
+    }));
     body.appendChild(el("div", { class: "f-row" }, [
       el("button", {
         class: "btn", type: "button", text: "＋ 添加计时项",
@@ -539,29 +520,63 @@
         }),
       ]));
     } else if (state.top_source === "exchange") {
+      body.appendChild(el("div", { class: "f-section-hint", text: "每个目标货币独立与源货币换算，互不影响；某个货币取数失败只隐藏该行。" }));
       var from = el("input", { value: state.exchange_from || "USD" });
       from.addEventListener("input", function () {
         state.exchange_from = from.value.trim().toUpperCase(); saveSilent(); renderCanvas();
       });
       body.appendChild(fieldRow("源货币", from));
-      var targets = el("input", {
-        value: (state.exchange_targets || []).join(", "),
-        placeholder: "多个目标货币用逗号分隔，如：CNY, JPY, EUR",
-      });
-      targets.addEventListener("input", function () {
-        state.exchange_targets = targets.value
-          .split(/[,，\s]+/)
-          .map(function (t) { return t.trim().toUpperCase(); })
-          .filter(function (t, i, arr) { return t && arr.indexOf(t) === i; });
-        saveSilent(); renderCanvas();
-      });
-      body.appendChild(fieldRow("目标货币", targets));
+
       var amt = el("input", { type: "number", min: "0.01", value: String(state.exchange_amount || 100) });
       amt.addEventListener("input", function () {
         state.exchange_amount = Number(amt.value) || 100; saveSilent(); renderCanvas();
       });
       body.appendChild(fieldRow("换算金额", amt));
-      body.appendChild(el("div", { class: "f-section-hint", text: "一个源货币可同时展示多个目标货币（最多 6 个）。" }));
+
+      body.appendChild(el("div", { class: "f-label", text: "目标货币（最多 6 项）" }));
+      var list = el("div", { class: "f-list" });
+      var targets = state.exchange_targets || [];
+      targets.forEach(function (code, i) {
+        var input = el("input", {
+          class: "grow", value: code || "", placeholder: "如：CNY",
+          oninput: function () {
+            var v = input.value.trim().toUpperCase();
+            state.exchange_targets[i] = v;
+            saveSilent(); renderCanvas();
+          },
+        });
+        list.appendChild(el("div", { class: "f-item" }, [
+          el("span", { class: "f-idx", text: String(i + 1) }),
+          input,
+          actionBtn("↑", function () {
+            move(state.exchange_targets, i, -1); saveSilent(); renderCanvas(); renderTopModal(body);
+          }),
+          actionBtn("↓", function () {
+            move(state.exchange_targets, i, 1); saveSilent(); renderCanvas(); renderTopModal(body);
+          }),
+          el("button", {
+            class: "btn btn-mini btn-danger", type: "button", text: "✕",
+            onclick: function () {
+              state.exchange_targets.splice(i, 1); saveSilent(); renderCanvas(); renderTopModal(body);
+            },
+          }),
+        ]));
+      });
+      if (!targets.length) {
+        list.appendChild(el("div", { class: "muted", text: "暂无目标货币，点击下方按钮添加。" }));
+      }
+      body.appendChild(list);
+      body.appendChild(el("div", { class: "f-row" }, [
+        el("button", {
+          class: "btn", type: "button", text: "＋ 添加目标货币",
+          onclick: function () {
+            if ((state.exchange_targets || []).length >= 6) return msg("最多 6 个目标货币", true);
+            if (!state.exchange_targets) state.exchange_targets = [];
+            state.exchange_targets.push("");
+            saveSilent(); renderCanvas(); renderTopModal(body);
+          },
+        }),
+      ]));
     }
   }
 
@@ -571,68 +586,6 @@
       params[field.key] = field.default || "";
     });
     return params;
-  }
-
-  function renderMidModal(body, slot) {
-    body.textContent = "";
-    var isMid1 = slot === 1;
-    var slotKey = isMid1 ? "mid1" : "mid2";
-    var srcKey = isMid1 ? "mid1_source" : "mid2_source";
-    var titleKey = isMid1 ? "mid1_title" : "mid2_title";
-    var countKey = isMid1 ? "mid1_count" : "mid2_count";
-    var paramsKey = isMid1 ? "mid1_params" : "mid2_params";
-    var candidates = isMid1 ? MID1_SOURCES : MID2_SOURCES;
-    var srcLabel = isMid1 ? "番剧 / 游戏" : "新闻 / 资讯";
-    body.appendChild(el("div", { class: "f-label", text: SLOT_LABELS[slotKey] + " 来源（单选）" }));
-    body.appendChild(fieldRow("来源", sourceSelect(candidates, state[srcKey], function (v) {
-      state[srcKey] = v;
-      state[paramsKey] = defaultParams(v);
-      state[titleKey] = candidates[v];
-      saveSilent();
-      renderMidModal(body, slot);
-    })));
-    var title = el("input", { value: state[titleKey] || candidates[state[srcKey]] || "" });
-    title.addEventListener("input", function () { state[titleKey] = title.value; saveSilent(); renderCanvas(); });
-    body.appendChild(fieldRow("标题", title));
-    var count = el("input", { type: "number", min: "1", max: "30", value: String(state[countKey] || 4) });
-    count.addEventListener("input", function () { state[countKey] = Math.max(1, Number(count.value) || 4); saveSilent(); renderCanvas(); });
-    body.appendChild(fieldRow("条数", count));
-
-    // 「配置接口」：参数直接写入该固定模块位，输入即自动保存（无需点「完成」）
-    var schema = PARAM_SCHEMA[state[srcKey]];
-    if (schema && schema.length) {
-      var sec = el("div", { class: "f-section" }, [
-        el("div", { class: "f-section-title", text: "配置接口" }),
-        el("div", { class: "f-section-hint", text: "修改后立即自动保存（key/token 在插件配置界面统一设置）" }),
-      ]);
-      if (!state[paramsKey] || typeof state[paramsKey] !== "object") state[paramsKey] = {};
-      schema.forEach(function (f) {
-        var cur = state[paramsKey][f.key];
-        if (cur == null || cur === "") cur = f.default || "";
-        var input;
-        if (f.type === "select") {
-          input = el("select");
-          (f.options || []).forEach(function (opt) {
-            var o = el("option", { value: opt.value, text: opt.label });
-            if (String(cur) === String(opt.value)) o.selected = true;
-            input.appendChild(o);
-          });
-        } else {
-          input = el("input", { type: "text", value: cur, placeholder: f.placeholder || "" });
-        }
-        var commit = function () {
-          state[paramsKey][f.key] = input.value;
-          saveSilent();
-          renderCanvas();
-        };
-        if (f.type === "select") input.addEventListener("change", commit);
-        else input.addEventListener("input", commit);
-        sec.appendChild(fieldRow(f.label, input));
-      });
-      body.appendChild(sec);
-    } else {
-      body.appendChild(el("div", { class: "f-section-hint", text: srcLabel + " 当前来源无需额外接口参数。" }));
-    }
   }
 
   function renderHistoryModal(body) {
@@ -707,8 +660,23 @@
     var mod = state.modules[idx];
     if (!mod) { closeModal(); return; }
     var meta = MODULE_TYPES[mod.type] || { label: mod.type };
+    // 类型下拉按分类分组（番剧游戏 / 新闻资讯 / 文字内容）
     var typeSel = el("select");
+    var categorized = {};
+    Object.keys(MODULE_CATEGORIES).forEach(function (cat) {
+      var grp = el("optgroup", { label: cat });
+      MODULE_CATEGORIES[cat].forEach(function (t) {
+        if (!MODULE_TYPES[t]) return;
+        var o = el("option", { value: t, text: MODULE_TYPES[t].label });
+        if (mod.type === t) o.selected = true;
+        grp.appendChild(o);
+        categorized[t] = true;
+      });
+      if (grp.children.length) typeSel.appendChild(grp);
+    });
+    // 未分类类型兜底（后端新增模块而分类未同步时仍可选）
     Object.keys(MODULE_TYPES).forEach(function (t) {
+      if (categorized[t]) return;
       var o = el("option", { value: t, text: MODULE_TYPES[t].label });
       if (mod.type === t) o.selected = true;
       typeSel.appendChild(o);
@@ -805,14 +773,6 @@
       history_title: data.history_title || "历史上的今天",
       history_count: Number(data.history_count) || 4,
       top_source: data.top_source || "history",
-      mid1_source: data.mid1_source || "anime",
-      mid1_title: data.mid1_title || "今日新番",
-      mid1_count: Number(data.mid1_count) || 4,
-      mid1_params: data.mid1_params && typeof data.mid1_params === "object" ? data.mid1_params : {},
-      mid2_source: data.mid2_source || "news",
-      mid2_title: data.mid2_title || "60s读懂世界",
-      mid2_count: Number(data.mid2_count) || 10,
-      mid2_params: data.mid2_params && typeof data.mid2_params === "object" ? data.mid2_params : {},
       exchange_from: data.exchange_from || "USD",
       exchange_targets:
         Array.isArray(data.exchange_targets) && data.exchange_targets.length
@@ -885,8 +845,7 @@
         if (meta && meta.quote_sources) QUOTE_SOURCES = meta.quote_sources;
         if (meta && meta.param_schema) PARAM_SCHEMA = meta.param_schema;
         if (meta && meta.top_sources) TOP_SOURCES = meta.top_sources;
-        if (meta && meta.mid1_sources) MID1_SOURCES = meta.mid1_sources;
-        if (meta && meta.mid2_sources) MID2_SOURCES = meta.mid2_sources;
+        if (meta && meta.module_categories) MODULE_CATEGORIES = meta.module_categories;
       } catch (e) {}
       await loadConfig();
     } catch (e) {
