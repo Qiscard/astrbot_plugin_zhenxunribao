@@ -49,12 +49,82 @@
   var state = {
     moyu_title: "摸鱼日历", moyu_items: [], history_enabled: true,
     history_title: "历史上的今天", history_count: 4,
-    top_source: "history",
+    top_source: "history", top_english_count: 1,
     exchange_from: "USD", exchange_targets: ["CNY"], exchange_amount: 100,
     quote_enabled: true, quote_title: "", quote_sources: ["hitokoto"], modules: [],
+    theme: "mahiro",
   };
   // 顶部候选来源（后端 meta 会覆盖；此处为离线兜底）
   var TOP_SOURCES = { history: "历史上的今天", english: "每日英语", exchange: "实时汇率" };
+  // 预设主题（后端 meta 会覆盖；此处为离线兜底，色值与后端 THEME_PRESETS 一致）
+  var THEME_PRESETS = {
+    mahiro: { label: "真寻粉", colors: {
+      pink_bg: "#e8aebb", panel_bg: "#ece7eb", panel_border: "#ee97ae",
+      panel_border_deep: "#ea8aa3", panel_tag_bg: "#fbf9fa", title_pink: "#f39db4",
+      title_shadow: "#de839d", title_white: "#fffafc", text_main: "#252630",
+      text_soft: "#9f7687", text_accent: "#ff8ca7",
+    } },
+    sakura: { label: "樱花粉", colors: {
+      pink_bg: "#f4b9c9", panel_bg: "#fbeef2", panel_border: "#ef9fb6",
+      panel_border_deep: "#e68ba5", panel_tag_bg: "#fff9fb", title_pink: "#f491b0",
+      title_shadow: "#d97f9b", title_white: "#fffdfe", text_main: "#2b2b36",
+      text_soft: "#a6788c", text_accent: "#ff6f9c",
+    } },
+    lavender: { label: "薰衣草紫", colors: {
+      pink_bg: "#c3b3e8", panel_bg: "#efeafb", panel_border: "#a48ad9",
+      panel_border_deep: "#977bd1", panel_tag_bg: "#faf8ff", title_pink: "#9a86e0",
+      title_shadow: "#7f6bc7", title_white: "#fdfcff", text_main: "#2a2938",
+      text_soft: "#84769e", text_accent: "#7c5cf0",
+    } },
+    sky: { label: "晴空蓝", colors: {
+      pink_bg: "#a7c4e8", panel_bg: "#e9f1fa", panel_border: "#8fb3e0",
+      panel_border_deep: "#7ea6da", panel_tag_bg: "#fafcff", title_pink: "#7aa7e0",
+      title_shadow: "#5f8fc9", title_white: "#fbfdff", text_main: "#252c3a",
+      text_soft: "#6f86a5", text_accent: "#4f8ef7",
+    } },
+    mint: { label: "薄荷绿", colors: {
+      pink_bg: "#9fd4c2", panel_bg: "#e9f7f2", panel_border: "#7fc4ae",
+      panel_border_deep: "#6cb69f", panel_tag_bg: "#f8fffc", title_pink: "#6cbfa4",
+      title_shadow: "#4fa58a", title_white: "#fbfffd", text_main: "#24332e",
+      text_soft: "#6f9488", text_accent: "#2fae8b",
+    } },
+    gold: { label: "暖阳橙", colors: {
+      pink_bg: "#eec09a", panel_bg: "#fbf1e6", panel_border: "#e3ab7c",
+      panel_border_deep: "#d99c69", panel_tag_bg: "#fffaf4", title_pink: "#e3a26e",
+      title_shadow: "#c98755", title_white: "#fffcf9", text_main: "#322a23",
+      text_soft: "#a08169", text_accent: "#f08a3c",
+    } },
+    matcha: { label: "抹茶绿", colors: {
+      pink_bg: "#b5c99a", panel_bg: "#f0f5e8", panel_border: "#a3bd86",
+      panel_border_deep: "#93b174", panel_tag_bg: "#fbfdf6", title_pink: "#96b479",
+      title_shadow: "#7a9c5c", title_white: "#fcfff8", text_main: "#2b3226",
+      text_soft: "#82926e", text_accent: "#6da63c",
+    } },
+    midnight: { label: "夜幕蓝", colors: {
+      pink_bg: "#a8b2c8", panel_bg: "#eef1f7", panel_border: "#93a0bf",
+      panel_border_deep: "#8291b3", panel_tag_bg: "#fafbfe", title_pink: "#8898bd",
+      title_shadow: "#6c7ca4", title_white: "#fcfdff", text_main: "#282c38",
+      text_soft: "#75819d", text_accent: "#5a7be8",
+    } },
+  };
+  // 主题颜色名 → 编辑器画布 CSS 变量映射
+  var THEME_CSS_MAP = {
+    pink_bg: "pink", panel_bg: "panel", panel_border: "panel-border",
+    panel_border_deep: "panel-border-deep", panel_tag_bg: "tag",
+    title_pink: "title-pink", title_shadow: "title-shadow",
+    title_white: "title-white", text_main: "main", text_soft: "soft",
+    text_accent: "accent",
+  };
+  // 当前主题的颜色集（renderCanvas 里通过 --t-* 自定义属性传递）
+  function themeColors() {
+    var t = THEME_PRESETS[state.theme] || THEME_PRESETS[Object.keys(THEME_PRESETS)[0]];
+    return t.colors;
+  }
+  function themeCss() {
+    var c = themeColors(), vars = [];
+    Object.keys(THEME_CSS_MAP).forEach(function (k) { vars.push("--t-" + THEME_CSS_MAP[k] + ":" + c[k]); });
+    return vars.join(";");
+  }
   // 中间模块类型分类（后端 meta 会覆盖；此处为离线兜底）
   var MODULE_CATEGORIES = {
     "番剧游戏": ["anime", "cartoon", "hbox"],
@@ -180,6 +250,7 @@
     var s = snapshot();
     var root = document.getElementById("preview");
     root.textContent = "";
+    root.setAttribute("style", themeCss());
 
     var header = el("div", { class: "dp-header" }, [
       el("div", { class: "dp-figure" }, [el("div", { class: "ph", text: "真寻" })]),
@@ -233,11 +304,14 @@
         onclick: function (e) { e.stopPropagation(); openModal({ kind: "top" }); },
       }));
     } else if (s.top_source === "english") {
+      var enN = Math.max(1, Math.min(5, Number(s.top_english_count) || 1));
       lead.appendChild(panel("每日英语", [
-        el("div", {}, [
-          el("div", {}, [el("span", { class: "dp-en-word", text: PH.word }), el("span", { class: "dp-en-ph", text: "/phonetic/" })]),
-          el("div", { class: "muted", text: "n. " + PH.mean }), el("div", { class: "muted", text: PH.eg }),
-        ]),
+        el("div", { class: "dp-en-list" }, rep(enN, function () {
+          return el("div", { class: "dp-en-item" }, [
+            el("div", {}, [el("span", { class: "dp-en-word", text: PH.word }), el("span", { class: "dp-en-ph", text: "/phonetic/" })]),
+            el("div", { class: "muted", text: "n. " + PH.mean }), el("div", { class: "muted", text: PH.eg }),
+          ]);
+        })),
       ], {
         onclick: function (e) { e.stopPropagation(); openModal({ kind: "top" }); },
       }));
@@ -274,10 +348,12 @@
           return el("li", { text: PH.news + " " + (i + 1) });
         })));
       } else if (mod.type === "english") {
-        content.push(el("div", {}, [
-          el("div", {}, [el("span", { class: "dp-en-word", text: PH.word }), el("span", { class: "dp-en-ph", text: "/phonetic/" })]),
-          el("div", { class: "muted", text: "n. " + PH.mean }), el("div", { class: "muted", text: PH.eg }),
-        ]));
+        content.push(el("div", { class: "dp-en-list" }, rep(Math.max(1, Math.min(5, mod.count || 1)), function () {
+          return el("div", { class: "dp-en-item" }, [
+            el("div", {}, [el("span", { class: "dp-en-word", text: PH.word }), el("span", { class: "dp-en-ph", text: "/phonetic/" })]),
+            el("div", { class: "muted", text: "n. " + PH.mean }), el("div", { class: "muted", text: PH.eg }),
+          ]);
+        })));
       } else if (mod.type === "essay") {
         content.push(el("div", { class: "dp-essay" }, [
           el("div", { class: "dp-essay-title", text: "{{文章标题}}" }),
@@ -379,6 +455,14 @@
         }),
       ]));
     }
+    var themeName = (THEME_PRESETS[state.theme] && THEME_PRESETS[state.theme].label) || state.theme;
+    mainKids.push(el("div", { class: "dp-theme-bar" }, [
+      el("span", { class: "hint", text: "主题：" }),
+      el("button", {
+        class: "dp-hidden-chip", type: "button", text: "🎨 " + themeName + "（点击更换）",
+        onclick: function (e) { e.stopPropagation(); openModal({ kind: "theme" }); },
+      }),
+    ]));
     mainKids.push(el("div", { class: "dp-foot", text: "ZHENXUN DAILY EDETOR · 布局占位画布" }));
     root.appendChild(el("div", { class: "dp-main" }, mainKids));
   }
@@ -392,6 +476,7 @@
     else if (target.kind === "top") { title.textContent = "编辑：顶部模块（右上固定位）"; renderTopModal(body); }
     else if (target.kind === "quote") { title.textContent = "编辑：底部引用（底部固定位）"; renderQuoteModal(body); }
     else if (target.kind === "module") { title.textContent = "编辑：中间模块"; renderModuleModal(body, target.index); }
+    else if (target.kind === "theme") { title.textContent = "编辑：主题与美化"; renderThemeModal(body); }
     document.getElementById("modal").classList.remove("hidden");
   }
   function closeModal() { document.getElementById("modal").classList.add("hidden"); }
@@ -519,6 +604,14 @@
           onclick: function () { state.history_enabled = false; saveSilent(); closeModal(); renderCanvas(); },
         }),
       ]));
+    } else if (state.top_source === "english") {
+      body.appendChild(el("div", { class: "f-section-hint", text: "每日英语一次可展示多个单词，每个单词随机获取（接口单次最多 5 个）。" }));
+      var enCount = el("input", { type: "number", min: "1", max: "5", value: String(state.top_english_count || 1) });
+      enCount.addEventListener("input", function () {
+        state.top_english_count = Math.max(1, Math.min(5, Number(enCount.value) || 1));
+        saveSilent(); renderCanvas();
+      });
+      body.appendChild(fieldRow("单词数量", enCount));
     } else if (state.top_source === "exchange") {
       body.appendChild(el("div", { class: "f-section-hint", text: "每个目标货币独立与源货币换算，互不影响；某个货币取数失败只隐藏该行。" }));
       var from = el("input", { value: state.exchange_from || "USD" });
@@ -586,6 +679,38 @@
       params[field.key] = field.default || "";
     });
     return params;
+  }
+
+  // 主题方案A：预设主题卡片（同 bot_menu 主题方案），点选即应用并自动保存。
+  // 界面美化（圆角/阴影）沿用日报模板默认值，后续可在此扩展。
+  function renderThemeModal(body) {
+    body.textContent = "";
+    body.appendChild(el("div", { class: "f-label", text: "预设主题（方案A）" }));
+    var grid = el("div", { class: "theme-grid" });
+    Object.keys(THEME_PRESETS).forEach(function (key) {
+      var t = THEME_PRESETS[key];
+      var card = el("div", {
+        class: "theme-card" + (state.theme === key ? " selected" : ""),
+        onclick: function () {
+          state.theme = key; saveSilent(); renderCanvas(); renderThemeModal(body);
+        },
+      });
+      var c = t.colors;
+      card.appendChild(el("div", { class: "theme-swatches" }, [
+        el("span", { class: "sw", style: "background:" + c.title_pink }),
+        el("span", { class: "sw", style: "background:" + c.panel_border }),
+        el("span", { class: "sw", style: "background:" + c.pink_bg }),
+        el("span", { class: "sw", style: "background:" + c.text_accent }),
+      ]));
+      card.appendChild(el("div", { class: "theme-label", text: t.label }));
+      if (state.theme === key) card.appendChild(el("div", { class: "theme-check", text: "✓ 已应用" }));
+      grid.appendChild(card);
+    });
+    body.appendChild(grid);
+    body.appendChild(el("div", {
+      class: "f-section-hint",
+      text: "主题由背景、面板、描边、标题与文字配色组成；圆角、阴影等界面美化沿用日报模板默认值。选择后立即自动保存。",
+    }));
   }
 
   function renderHistoryModal(body) {
@@ -773,6 +898,7 @@
       history_title: data.history_title || "历史上的今天",
       history_count: Number(data.history_count) || 4,
       top_source: data.top_source || "history",
+      top_english_count: Math.max(1, Math.min(5, Number(data.top_english_count) || 1)),
       exchange_from: data.exchange_from || "USD",
       exchange_targets:
         Array.isArray(data.exchange_targets) && data.exchange_targets.length
@@ -786,6 +912,7 @@
           ? data.quote_sources
           : ["hitokoto"],
       modules: Array.isArray(data.modules) ? data.modules : [],
+      theme: THEME_PRESETS[data.theme] ? data.theme : Object.keys(THEME_PRESETS)[0],
     };
     renderCanvas();
   }
@@ -810,6 +937,7 @@
   window.addEventListener("DOMContentLoaded", async function () {
     document.getElementById("btn-save").addEventListener("click", function (e) { saveConfig(e.currentTarget); });
     document.getElementById("btn-preview").addEventListener("click", function (e) { renderPreview(e.currentTarget); });
+    document.getElementById("btn-theme").addEventListener("click", function () { openModal({ kind: "theme" }); });
     document.getElementById("btn-reload").addEventListener("click", function () {
       loadConfig().catch(function (e) { msg(e.message, true); });
     });
@@ -846,6 +974,7 @@
         if (meta && meta.param_schema) PARAM_SCHEMA = meta.param_schema;
         if (meta && meta.top_sources) TOP_SOURCES = meta.top_sources;
         if (meta && meta.module_categories) MODULE_CATEGORIES = meta.module_categories;
+        if (meta && meta.theme_presets) THEME_PRESETS = meta.theme_presets;
       } catch (e) {}
       await loadConfig();
     } catch (e) {

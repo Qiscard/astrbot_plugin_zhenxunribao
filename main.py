@@ -68,6 +68,8 @@ MODULE_TYPE_META = {
     "english": {
         "title": "每日英语",
         "count": 1,
+        # 英语接口单次最多返回 5 个单词，条数上限收窄避免误导
+        "count_max": 5,
         "icon": "./res/icon/hitokoto.png",
         "slots": ["body"],
         "render": "english",
@@ -216,6 +218,159 @@ MODULE_CATEGORIES = {
     "文字内容": ["english", "essay", "shici", "yulu"],
 }
 
+# 预设主题（方案A，参考 bot_menu 主题方案）：每个主题给出日报 :root 中
+# 全部颜色变量（--pink-bg 背景 / --panel-bg 面板 / --panel-border 描边 /
+# --title-pink 标题 / --text-* 文字），界面美化（圆角/阴影）沿用模板默认值。
+# 第一个 key 为默认主题。
+THEME_PRESETS = {
+    "mahiro": {
+        "label": "真寻粉",
+        "colors": {
+            "pink_bg": "#e8aebb",
+            "panel_bg": "#ece7eb",
+            "panel_border": "#ee97ae",
+            "panel_border_deep": "#ea8aa3",
+            "panel_tag_bg": "#fbf9fa",
+            "title_pink": "#f39db4",
+            "title_shadow": "#de839d",
+            "title_white": "#fffafc",
+            "text_main": "#252630",
+            "text_soft": "#9f7687",
+            "text_accent": "#ff8ca7",
+        },
+    },
+    "sakura": {
+        "label": "樱花粉",
+        "colors": {
+            "pink_bg": "#f4b9c9",
+            "panel_bg": "#fbeef2",
+            "panel_border": "#ef9fb6",
+            "panel_border_deep": "#e68ba5",
+            "panel_tag_bg": "#fff9fb",
+            "title_pink": "#f491b0",
+            "title_shadow": "#d97f9b",
+            "title_white": "#fffdfe",
+            "text_main": "#2b2b36",
+            "text_soft": "#a6788c",
+            "text_accent": "#ff6f9c",
+        },
+    },
+    "lavender": {
+        "label": "薰衣草紫",
+        "colors": {
+            "pink_bg": "#c3b3e8",
+            "panel_bg": "#efeafb",
+            "panel_border": "#a48ad9",
+            "panel_border_deep": "#977bd1",
+            "panel_tag_bg": "#faf8ff",
+            "title_pink": "#9a86e0",
+            "title_shadow": "#7f6bc7",
+            "title_white": "#fdfcff",
+            "text_main": "#2a2938",
+            "text_soft": "#84769e",
+            "text_accent": "#7c5cf0",
+        },
+    },
+    "sky": {
+        "label": "晴空蓝",
+        "colors": {
+            "pink_bg": "#a7c4e8",
+            "panel_bg": "#e9f1fa",
+            "panel_border": "#8fb3e0",
+            "panel_border_deep": "#7ea6da",
+            "panel_tag_bg": "#fafcff",
+            "title_pink": "#7aa7e0",
+            "title_shadow": "#5f8fc9",
+            "title_white": "#fbfdff",
+            "text_main": "#252c3a",
+            "text_soft": "#6f86a5",
+            "text_accent": "#4f8ef7",
+        },
+    },
+    "mint": {
+        "label": "薄荷绿",
+        "colors": {
+            "pink_bg": "#9fd4c2",
+            "panel_bg": "#e9f7f2",
+            "panel_border": "#7fc4ae",
+            "panel_border_deep": "#6cb69f",
+            "panel_tag_bg": "#f8fffc",
+            "title_pink": "#6cbfa4",
+            "title_shadow": "#4fa58a",
+            "title_white": "#fbfffd",
+            "text_main": "#24332e",
+            "text_soft": "#6f9488",
+            "text_accent": "#2fae8b",
+        },
+    },
+    "gold": {
+        "label": "暖阳橙",
+        "colors": {
+            "pink_bg": "#eec09a",
+            "panel_bg": "#fbf1e6",
+            "panel_border": "#e3ab7c",
+            "panel_border_deep": "#d99c69",
+            "panel_tag_bg": "#fffaf4",
+            "title_pink": "#e3a26e",
+            "title_shadow": "#c98755",
+            "title_white": "#fffcf9",
+            "text_main": "#322a23",
+            "text_soft": "#a08169",
+            "text_accent": "#f08a3c",
+        },
+    },
+    "matcha": {
+        "label": "抹茶绿",
+        "colors": {
+            "pink_bg": "#b5c99a",
+            "panel_bg": "#f0f5e8",
+            "panel_border": "#a3bd86",
+            "panel_border_deep": "#93b174",
+            "panel_tag_bg": "#fbfdf6",
+            "title_pink": "#96b479",
+            "title_shadow": "#7a9c5c",
+            "title_white": "#fcfff8",
+            "text_main": "#2b3226",
+            "text_soft": "#82926e",
+            "text_accent": "#6da63c",
+        },
+    },
+    "midnight": {
+        "label": "夜幕蓝",
+        "colors": {
+            "pink_bg": "#a8b2c8",
+            "panel_bg": "#eef1f7",
+            "panel_border": "#93a0bf",
+            "panel_border_deep": "#8291b3",
+            "panel_tag_bg": "#fafbfe",
+            "title_pink": "#8898bd",
+            "title_shadow": "#6c7ca4",
+            "title_white": "#fcfdff",
+            "text_main": "#282c38",
+            "text_soft": "#75819d",
+            "text_accent": "#5a7be8",
+        },
+    },
+}
+
+# 默认主题 key（THEME_PRESETS 第一项）
+DEFAULT_THEME = next(iter(THEME_PRESETS))
+
+# 主题颜色变量名 → 模板 CSS 变量名的映射（注入 :root 覆盖块时使用）
+THEME_CSS_VAR_NAMES = {
+    "pink_bg": "--pink-bg",
+    "panel_bg": "--panel-bg",
+    "panel_border": "--panel-border",
+    "panel_border_deep": "--panel-border-deep",
+    "panel_tag_bg": "--panel-tag-bg",
+    "title_pink": "--title-pink",
+    "title_shadow": "--title-shadow",
+    "title_white": "--title-white",
+    "text_main": "--text-main",
+    "text_soft": "--text-soft",
+    "text_accent": "--text-accent",
+}
+
 # modules.json 不存在时写入的默认配置
 DEFAULT_MODULE_CONFIG = {
     "moyu_title": "摸鱼日历",
@@ -232,10 +387,14 @@ DEFAULT_MODULE_CONFIG = {
     # （history/english/exchange；history_* 字段为 history 来源的参数）
     "top_source": "history",
     "top_params": {},
+    # 顶部来源为 english 时展示的单词数量（1-5，接口单次上限 5 个）
+    "top_english_count": 1,
     # 实时汇率参数：一个源货币，可配置多个目标货币（最多 6 个）
     "exchange_from": "USD",
     "exchange_targets": ["CNY"],
     "exchange_amount": 100,
+    # 主题：THEME_PRESETS 中的预设 key（方案A，界面美化沿用模板默认值）
+    "theme": DEFAULT_THEME,
     # 底栏引用固定展示在日报底部，quote_sources 可多选（每次随机取其一）
     "quote_enabled": True,
     "quote_title": "",
@@ -656,9 +815,12 @@ class ZhenxunReportPlugin(Star):
             m["enabled"] = bool(m.get("enabled", True))
             m["title"] = str(m.get("title") or DEFAULT_MODULE_TITLES[mtype])
             if mtype in DEFAULT_MODULE_COUNTS:
+                # 条数上限按模块能力取 count_max，其余模块统一最多 30 条
+                count_max = MODULE_TYPE_META[mtype].get("count_max", 30)
                 try:
                     m["count"] = max(
-                        1, min(int(m.get("count", DEFAULT_MODULE_COUNTS[mtype])), 30)
+                        1,
+                        min(int(m.get("count", DEFAULT_MODULE_COUNTS[mtype])), count_max),
                     )
                 except (TypeError, ValueError):
                     m["count"] = DEFAULT_MODULE_COUNTS[mtype]
@@ -708,6 +870,15 @@ class ZhenxunReportPlugin(Star):
             cfg["top_source"] = "history"
         cfg["top_params"] = self._normalize_module_params(
             cfg["top_source"], cfg.get("top_params")
+        )
+        # 每日英语单词展示数量：1-5（接口单次最多 5 个单词）
+        try:
+            cfg["top_english_count"] = max(1, min(int(cfg.get("top_english_count", 1)), 5))
+        except (TypeError, ValueError):
+            cfg["top_english_count"] = 1
+        # 主题：仅接受预设 key，未知值回退默认主题
+        cfg["theme"] = (
+            cfg.get("theme") if cfg.get("theme") in THEME_PRESETS else DEFAULT_THEME
         )
         if cfg["top_source"] != "history":
             # 选择了英语/汇率来源时，顶部展示新来源而非历史面板
@@ -819,8 +990,8 @@ class ZhenxunReportPlugin(Star):
         return json_response(self._load_module_config())
 
     async def api_get_meta(self):
-        """返回编辑器所需的模块元数据：类型、分类、图标、接口参数 schema、短句来源，
-        以及顶部模块位的候选来源。"""
+        """返回编辑器所需的模块元数据：类型、分类、图标、接口参数 schema、短句来源、
+        顶部模块位的候选来源，以及预设主题列表。"""
         return json_response(
             {
                 "module_types": MODULE_TYPE_META,
@@ -829,6 +1000,7 @@ class ZhenxunReportPlugin(Star):
                 "param_schema": MODULE_PARAM_SCHEMA,
                 "quote_sources": QUOTE_SOURCE_LABELS,
                 "top_sources": TOP_SOURCE_LABELS,
+                "theme_presets": THEME_PRESETS,
             }
         )
 
@@ -1054,6 +1226,19 @@ class ZhenxunReportPlugin(Star):
 
         template = Template(html_template_str)
         rendered_html = template.render(**template_data)
+
+        # 主题方案A：注入预设主题的 CSS 变量覆盖块，替换模板 :root 中的颜色。
+        # 该块与 :root 同时存在时按层叠顺序覆盖同优先级变量。
+        theme = THEME_PRESETS.get(
+            module_cfg.get("theme"), THEME_PRESETS[DEFAULT_THEME]
+        )
+        theme_vars = ";".join(
+            f"{THEME_CSS_VAR_NAMES[key]}:{theme['colors'][key]}"
+            for key in THEME_CSS_VAR_NAMES
+        )
+        theme_override = f"<style>:root{{{theme_vars}}}</style>"
+        rendered_html = rendered_html.replace("</head>", theme_override + "</head>", 1)
+
         rendered_html = await self._embed_resources(rendered_html)
 
         style_fix = """
@@ -1111,9 +1296,13 @@ html, body {
             tasks.append(
                 (
                     "english",
-                    {"title": "每日英语", "count": module_cfg.get("top_english_count", 1), "slot": "top"},
+                    {
+                        "title": "每日英语",
+                        "count": module_cfg["top_english_count"],
+                        "slot": "top",
+                    },
                     self.english_api.get_words_async(
-                        max_count=module_cfg.get("top_english_count", 1)
+                        max_count=module_cfg["top_english_count"]
                     ),
                 )
             )
