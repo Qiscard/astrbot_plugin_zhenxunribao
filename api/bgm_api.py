@@ -104,8 +104,8 @@ class BGMAPI(BaseAPI):
             ]
         """
         if not api_data or not isinstance(api_data, list):
-            logger.warning("BGM API 数据为空或格式错误")
-            return []
+            logger.warning("BGM API 数据为空或格式错误，使用默认数据")
+            return self._get_default_anime()
 
         try:
             # 获取今天是星期几 (0=周一, 6=周日)
@@ -160,27 +160,41 @@ class BGMAPI(BaseAPI):
 
                     break
 
-            # 如果没有找到数据，返回空列表（由模板显示占位文案）
+            # 如果没有找到数据，返回默认值
             if len(anime_list) == 0:
-                logger.warning("未找到今日新番数据")
-                return []
+                logger.warning("未找到今日新番数据，使用默认数据")
+                return self._get_default_anime()
 
             logger.debug(f"成功解析 {len(anime_list)} 部新番")
             return anime_list
 
         except Exception as e:
             logger.error(f"解析 BGM 数据时出错: {e}", exc_info=True)
-            return []
+            return self._get_default_anime()
+    
+    def _get_default_anime(self) -> List[Dict]:
+        """
+        返回默认的新番数据（当 API 失败时使用）
 
+        Returns:
+            默认新番列表。image 留空，模板会渲染 SVG 占位图兜底。
+        """
+        return [
+            {'title': '葬送的芙莉莲 第二季', 'image': ''},
+            {'title': '咒术回战 涉谷事变篇', 'image': ''},
+            {'title': '间谍过家家 第三季', 'image': ''},
+            {'title': '鬼灭之刃 柱训练篇', 'image': ''}
+        ]
+    
     async def get_today_anime_async(self, max_count: int = 4) -> List[Dict]:
         """
         异步方式获取今日新番数据（推荐用于 AstrBot）
-
+        
         Args:
             max_count: 最多返回几个新番
-
+            
         Returns:
-            格式化的今日新番列表，数据不可用时返回空列表
+            格式化的今日新番列表
         """
         api_data = await self.get_calendar_async()
         return self.parse_today_anime(api_data, max_count)

@@ -2,12 +2,14 @@
 节假日 API 处理模块
 用于获取和解析节假日数据，供日报模板使用
 """
-import aiohttp
 import json
 from datetime import datetime, date
-from typing import List, Dict, Optional
+from typing import Optional
 
+import aiohttp
 from astrbot.api import logger
+
+from .alapi_api import ALAPIClient
 from .base_api import BaseAPI
 
 
@@ -26,21 +28,18 @@ class HolidayAPI(BaseAPI):
         Args:
             session: 可选的 aiohttp.ClientSession，如果提供则复用
             year: 指定年份，None 则使用当前年份
-            token: ALAPI Token，用于备用接口，可从插件配置注入
+            token: 可选的 ALAPI Token，留空则无鉴权（需在插件配置界面填写）
         """
         super().__init__(session)
-        # Token 来自插件配置（api_token），为空则跳过备用接口
-        self.token = token or ""
+        self.alapi = ALAPIClient(session=session, token=token)
         # 使用 tangdouz 免费节日倒计时 API
         self.url = "https://api.tangdouz.com/nlholiday.php"
-        # 备用 API（ALAPI）
-        self.backup_url = "https://v3.alapi.cn/api/holiday"
         self.headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         }
         self.year = year or datetime.now().year
 
-    async def get_holidays_async(self) -> Optional[Dict]:
+    async def get_holidays_async(self) -> Optional[dict]:
         """
         异步方式获取节假日数据（推荐用于 AstrBot）
         优先使用 tangdouz 免费 API，失败时回退到 ALAPI
@@ -53,17 +52,15 @@ class HolidayAPI(BaseAPI):
         if result:
             return result
 
-        # 回退到 ALAPI（如果配置了 Token）
-        if self.token:
-            logger.info("免费节假日 API 失败，尝试使用 ALAPI 备用接口")
-            result = await self._fetch_from_alapi()
-            if result:
-                return result
+        # 回退到 ALAPI
+        logger.info("免费节假日 API 失败，尝试使用 ALAPI 备用接口")
+        holidays = await self.alapi.get_holidays(self.year)
+        if holidays:
+            return {"data": holidays, "from_alapi": True}
 
-        # 都失败了，返回 None
         return None
 
-    async def _fetch_from_tangdouz(self) -> Optional[Dict]:
+    async def _fetch_from_tangdouz(self) -> Optional[dict]:
         """从 tangdouz 免费 API 获取节假日倒计时"""
         try:
             params = {"return": "json"}
@@ -99,29 +96,7 @@ class HolidayAPI(BaseAPI):
             logger.warning(f"tangdouz 节假日 API 请求失败: {e}")
             return None
 
-    async def _fetch_from_alapi(self) -> Optional[Dict]:
-        """从 ALAPI 备用接口获取节假日"""
-        try:
-            params = {"token": self.token}
-            async with await self._request_with_retry(
-                "GET",
-                self.backup_url,
-                headers={"Content-Type": "application/json"},
-                params=params,
-                timeout=aiohttp.ClientTimeout(total=10),
-            ) as response:
-                response.raise_for_status()
-                data = await response.json()
-
-                if data and data.get('data'):
-                    logger.debug(f"成功从 ALAPI 备用接口获取节假日数据")
-                    return data
-                return None
-        except Exception as e:
-            logger.warning(f"ALAPI 备用接口请求失败: {e}")
-            return None
-    
-    def parse_holidays(self, api_data: Optional[Dict], max_count: int = 3) -> List[Dict]:
+    def parse_holidays(self, api_data: Optional[dict], max_count: int = 3) -> list:
         """
         解析节假日数据，转换为模板需要的格式
 
@@ -131,25 +106,46 @@ class HolidayAPI(BaseAPI):
 
         Returns:
             格式化的节假日列表，格式：
-            [
-                {'name': '春节', 'days_left': 25},
-                {'name': '清明节', 'days_left': 78},
-                ...
-            ]
-            数据不可用时返回空列表（由模板显示占位文案）
+            [{'name': '春节', 'days_left': 25}, ...]
         """
         if not api_data:
-            logger.warning("节假日 API 数据为空")
-            return []
+            logger.warning("节假日 API 数据为空，使用默认数据")
+            return self._get_default_holidays()
 
         try:
             # 提取数据
             holidays_data = api_data.get('data', [])
+            from_alapi = api_data.get('from_alapi', False)
             logger.debug(f"解析节假日数据，原始数据长度: {len(holidays_data) if isinstance(holidays_data, list) else 'N/A'}")
 
             if not isinstance(holidays_data, list) or len(holidays_data) == 0:
-                logger.warning("节假日数据列表为空")
-                return []
+                logger.warning("节假日数据列表为空，使用默认数据")
+                return self._get_default_holidays()
+
+            # ALAPI 返回的是全年假期安排 [{name, date, is_off_day}]，
+            # 需挑选下一个未过休假日并换算成剩余天数
+            if from_alapi:
+                result = []
+                for item in holidays_data:
+                    if not isinstance(item, dict):
+                        continue
+                    try:
+                        holiday_date = date.fromisoformat(str(item.get("date", ""))[:10])
+                    except (ValueError, TypeError):
+                        continue
+                    # is_off_day=0 表示调休上班日，跳过；只取还没到的放假日
+                    if item.get("is_off_day") == 0 or holiday_date < date.today():
+                        continue
+                    days_left = (holiday_date - date.today()).days
+                    result.append({
+                        "name": str(item.get("name", "") or "节假日"),
+                        "days_left": days_left,
+                    })
+                    if len(result) >= max_count:
+                        break
+                if result:
+                    return result
+                return self._get_default_holidays()
 
             # tangdouz API 已经处理好格式，直接使用
             # 数据格式: [{'name': '端午节', 'days_left': 3}, ...]
@@ -157,13 +153,31 @@ class HolidayAPI(BaseAPI):
 
             logger.debug(f"解析后的节假日: {result}")
 
+            # 如果没有数据，返回默认值
+            if len(result) == 0:
+                logger.warning("未找到节假日数据，使用默认数据")
+                return self._get_default_holidays()
+
             return result
 
         except Exception as e:
             logger.error(f"解析节假日数据时出错: {e}", exc_info=True)
-            return []
+            return self._get_default_holidays()
 
-    async def get_moyu_list_async(self, max_count: int = 3) -> List[Dict]:
+    def _get_default_holidays(self) -> list:
+        """
+        返回默认的节假日数据（当 API 失败时使用）
+
+        Returns:
+            默认节假日列表
+        """
+        return [
+            {'name': '周末', 'days_left': 3},
+            {'name': '春节', 'days_left': 25},
+            {'name': '清明节', 'days_left': 78}
+        ]
+
+    async def get_moyu_list_async(self, max_count: int = 3) -> list:
         """
         异步方式获取摸鱼日历数据（推荐用于 AstrBot）
 
@@ -171,7 +185,7 @@ class HolidayAPI(BaseAPI):
             max_count: 最多返回几个节假日
 
         Returns:
-            格式化的摸鱼日历列表，数据不可用时返回空列表
+            格式化的摸鱼日历列表
         """
         api_data = await self.get_holidays_async()
         return self.parse_holidays(api_data, max_count)

@@ -37,10 +37,6 @@ class BaseAPI:
             self._session = None
             self._own_session = False
 
-    async def close(self):
-        """释放本实例持有的连接资源（共享 session 不会被关闭）"""
-        await self._close_session()
-
     def set_session(self, session: aiohttp.ClientSession):
         """设置新的 session（用于 session 重置）"""
         self._session = session

@@ -8,7 +8,15 @@
 
 ## 📖 介绍
 
-这是一个从 [nonebot-plugin-zxreport](https://github.com/HibiKier/nonebot-plugin-zxreport) 移植到 AstrBot 的真寻日报插件。插件会每日为你汇总最新的资讯内容，包含今日新番、历史上的今天、世界新闻（60s读懂世界）、摸鱼日历和今日一言/毒鸡汤等内容。
+这是一个从 [nonebot-plugin-zxreport](https://github.com/HibiKier/nonebot-plugin-zxreport) 移植到 AstrBot 的真寻日报插件。插件会每日为你汇总最新的资讯内容，采用 **4 个固定模块位** 布局：顶部模块、中部模块1、中部模块2、底部引用；每个模块位从候选接口中单选一个展示。
+
+内置候选来源：
+- 顶部模块：历史上的今天 / 每日英语 / 实时汇率
+- 中部模块1：今日新番 / 今日追番 / 小黑盒游戏
+- 中部模块2：60s读懂世界 / AI早报 / 每日人民日报 PDF
+- 底部引用：今日一言 / 毒鸡汤 / 名人名言 / 舔狗日记 / 搞笑语录 / 歇后语 / 随机一言 / 随机谜语
+
+日报内容优先走糖豆子（tangdouz）免费接口，ALAPI 仅作为备用通道。
 
 ## 💿 安装
 
@@ -41,17 +49,81 @@ playwright install chromium
 
 | 配置 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `api_token` | str | `""` | ALAPI Token（可选），用于 60s读懂世界、历史上的今天等接口；在 [https://admin.alapi.cn/user/login](https://admin.alapi.cn/user/login) 注册后获取。留空时仅使用免费数据源，部分板块可能无数据 |
-| `max_anime_count` | int | `4` | 今日新番最大显示数量，建议设置为4-8之间 |
-| `max_news_count` | int | `10` | 60s读懂世界最大显示数量，建议设置为5-15之间 |
-| `max_holiday_count` | int | `5` | 摸鱼日历最大显示数量，建议设置为3-10之间 |
-| `max_history_count` | int | `8` | 历史上的今天最大显示数量，建议设置为5-15之间 |
-| `quote_mode` | str | `"hitokoto"` | 底栏引用模式，`hitokoto`（今日一言）或 `duji`（毒鸡汤） |
-| `render_dpr` | int | `5` | 渲染清晰度（DPR），越大越清晰但图片更大更慢，建议 3-6 |
+| `alapi_token` | str | `""` | ALAPI Token（备用通道），用于免费接口失败后的备用请求。建议在 Schema 中以密文方式显示。 |
+| `milora_api_key` | str | `""` | Milora API Key，用于 AI早报和每日人民日报；模块的 type/date 参数在日报编辑器中配置。 |
+| `render_dpr` | int | `5` | 渲染清晰度（DPR），运行时限制为 1-6，建议 3-6。 |
 | `enable_scheduled_push` | bool | `false` | 是否启用定时推送，启用后会在指定时间自动推送日报到配置的群组 |
 | `scheduled_push_time` | str | `"08:00"` | 定时推送时间，HH:MM格式（24小时制），例如：`08:00` 表示每天早上8点 |
-| `scheduled_push_groups` | list | `[]` | 定时推送目标会话列表，直接填写群号即可，如：`["957880653"]`，也支持完整的 unified_msg_origin 格式 |
+| `scheduled_push_groups` | list | `[]` | 定时推送目标群组列表，直接填写群号即可，如：`["957880653", "123456789"]` |
 | `enable_ai_greeting` | bool | `false` | 是否启用 AI 生成个性化问候语，启用后会调用 AstrBot 当前配置的大模型生成推送问候语 |
+
+> 模块来源、条数、标题及摸鱼日历内容已迁移到数据目录的 `modules.json`，见下一节。
+
+## 🧩 模块自定义配置（日报编辑器 / modules.json）
+
+**推荐方式**：在 AstrBot WebUI 左侧边栏打开本插件的 **「日报编辑器」Page**，可视化调整固定模块与来源，支持一键保存与真实渲染预览。
+
+**布局规则**：日报采用 4 个固定单面板位：
+- 顶部模块（右上）：从候选来源单选一个
+- 中部模块1：从候选来源单选一个
+- 中部模块2：从候选来源单选一个
+- 底部引用（底部）：从候选来源单选一个
+- 摸鱼日历（左上）：位置固定，仅内容可配
+
+其余模块（如旧版 modules 列表中的自定义模块）不再参与自由纵向排列；与中部模块1/中部模块2同类型的模块会被自动跳过，避免重复抓取。
+
+编辑器读写的是数据目录（`data/plugin_data/astrbot_plugin_zhenxunribao/modules.json`）中的 `modules.json`，插件每次生成日报时都会重新读取，**修改后立即生效，无需重载插件**。首次运行会自动生成默认配置：
+
+```jsonc
+{
+  // 摸鱼日历：位置固定在左上角，标题可改，展示内容按顺序渲染（最多 10 条）
+  "moyu_title": "摸鱼日历",
+  "moyu_items": [
+    // 三种计时项类型：
+    // holiday：自动取下一个法定节假日（多条 holiday 依次取后续节日）
+    { "type": "holiday" },
+    // weekly：周期性计时，weekday 1=周一 ... 7=周日；name 不填则显示「周休日」
+    { "type": "weekly", "name": "周休日", "weekday": 6 },
+    // custom：自定义计时，一次性日期过期自动变为「过了N天」，未来为「还剩N天」
+    //         "MM-DD" 为每年循环的日期（如生日、纪念日），始终显示「还剩N天」
+    { "type": "custom", "name": "元旦", "date": "01-01" },
+    // custom 条目也可以省略 type，带 date 即可
+    { "name": "项目上线", "date": "2026-01-01" }
+  ],
+  // 顶部来源：history / english / exchange
+  "top_source": "history",
+  "top_params": {},
+  // 中部模块1来源：anime / cartoon / hbox；cartoon 可配置 params.date
+  "mid1_source": "anime",
+  "mid1_title": "今日新番",
+  "mid1_count": 4,
+  "mid1_params": {},
+  // 中部模块2来源：news / aidaily / rmrbpdf；aidaily 可配置 type/date，rmrbpdf 可配置 date
+  "mid2_source": "news",
+  "mid2_title": "60s读懂世界",
+  "mid2_count": 10,
+  "mid2_params": {},
+  // 汇率参数（仅 top_source=exchange 时生效）
+  "exchange_from": "USD",
+  "exchange_to": "CNY",
+  "exchange_amount": 100,
+  // 底部引用来源单选：hitokoto / duji / mingyan / tiangou / gaoxiao / xiehouyu / sjyy / riddle
+  "quote_enabled": true,
+  "quote_title": "",
+  "quote_sources": ["hitokoto"],
+  // 旧版 modules 列表保留，但与 mid1/mid2 同类型的模块会被自动跳过
+  "modules": []
+}
+```
+
+说明：
+- 摸鱼日历、4 个固定模块位位置固定；固定模块的来源、标题、条数和接口参数均可在日报编辑器配置；
+- 摸鱼日历展示条数即 `moyu_items` 列表长度（1-10 条）；
+- 各面板数据为空（获取失败或无内容）时自动隐藏，不影响其他面板；
+- 旧版把 `history`/`quote` 写在 `modules` 里的配置会自动迁移为固定面板配置；
+- `alapi_token` 只用于 ALAPI 备用通道；Milora 的 AI早报/人民日报使用 `milora_api_key`。
+- 固定模块位和自由 `modules` 列表都可保存接口 `params`；固定槽位参数由 `mid1_params` / `mid2_params` 保存。
+- `/AI早报`、`/人民日报`、`/追番` 等聊天命令使用命令默认参数，不读取日报编辑器中的模块参数；日报编辑器配置只影响日报图片生成。
 
 ## 🎁 使用
 
@@ -64,23 +136,21 @@ playwright install chromium
 
 机器人将自动生成并发送当日日报图片。
 
-### 获取会话ID（可选）
+### 获取群组ID（可选）
 
-如果配置定时推送，可以在群内发送：
+如果直接填写群号无法推送，可以在群内发送：
 ```
 /日报群组ID
 ```
 
-机器人会返回当前会话的 `unified_msg_origin`，将其添加到配置中即可。
-
-> 💡 直接填写纯群号也可以，但插件需要先在该群触发过一次 `/日报` 才能学习到群号与会话的对应关系。填写完整的 `unified_msg_origin` 则无需学习。
+机器人会返回当前会话的完整标识，将其添加到配置中即可。
 
 ### 定时推送
 
 1. 在插件配置中启用 `enable_scheduled_push`
 2. 设置 `scheduled_push_time`（推送时间，默认 08:00）
-3. 在 `scheduled_push_groups` 中填写目标群号或 `unified_msg_origin`
-4. 保存配置后定时任务自动生效（调度器每 30 秒检查一次配置，无需重载插件）
+3. 在 `scheduled_push_groups` 中填写目标群号，如：`["957880653"]`
+4. 保存配置并重载插件，定时任务将自动启动
 
 ## 📋 依赖
 
@@ -100,33 +170,45 @@ playwright install chromium
 
 ## ⚠️ 注意事项
 
-1. **API Token 配置**：60s读懂世界与历史上的今天依赖 ALAPI（需配置 `api_token`）；未配置 Token 时新番、摸鱼日历、今日一言、毒鸡汤等免费数据源仍可正常获取，仅相关板块显示"暂无数据"
+1. **API Key/Token**：`milora_api_key` 仅用于 Milora；`alapi_token` 仅作为 ALAPI 备用通道。日报模块参数在日报编辑器配置，聊天命令使用自己的默认参数。
 2. **Playwright 安装**：首次使用需要安装 Playwright 的 Chromium 浏览器，执行 `playwright install chromium`
 3. **网络环境**：插件需要访问多个外部API，请确保网络连接正常
-4. **数据可信**：数据源失败时，对应板块显示"暂未获取到数据"占位提示，**不会展示编造的示例数据**
+4. **群组ID获取**：配置定时推送时，可以通过在目标群内发送 `/日报` 后查看日志获取正确的群组ID格式
 
 ## 🛠️ 技术实现
 
 - 使用 **Jinja2** 渲染HTML模板
-- 使用 **Playwright** 进行HTML到图片的转换，支持高 DPR 高清渲染（本地渲染，不上传数据到第三方渲染服务）
-- 使用 **aiohttp** 异步获取多个数据源，带指数退避重试
+- 使用 **Playwright** 进行HTML到图片的转换，支持 1-6 倍 DPR 高清渲染（默认 5）
+- 使用 **aiohttp** 异步获取多个数据源
 - 资源文件通过 Base64 编码嵌入HTML，确保图片和字体正常显示
-- 定时推送统一走 `context.send_message`，支持所有平台适配器（aiocqhttp、QQ官方API、Telegram等）
 
 ## 📝 功能特性
 
-- 📺 **今日新番** - 显示今日更新的动画番剧信息（Bangumi 数据）
-- 🌍 **60s读懂世界** - 每日新闻资讯（ALAPI，需 Token；备用：知乎日报）
-- 📜 **历史上的今天** - 历史上的今天发生的事件（ALAPI，需 Token）
-- 🐟 **摸鱼日历** - 显示节假日和重要日期倒计时
-- 💬 **今日一言 / 毒鸡汤** - 每日一句精美文案，可切换模式
-- 🤖 **AI 问候语** - 定时推送时可由 LLM 生成个性化问候语
-- ⏰ **定时推送** - 每日定时推送到指定群组/会话
+- 📰 **顶部模块** - 历史上的今天 / 每日英语 / 实时汇率（三选一固定面板）
+- 📺 **中部模块1** - 今日新番 / 今日追番 / 小黑盒游戏（三选一固定面板）
+- 🤖 **中部模块2** - 60s读懂世界 / AI早报 / 每日人民日报（三选一固定面板）
+- 💬 **底部引用** - 一言/毒鸡汤/名言/谜语/随机一言等（可多选，每次随机取其一）
+- 🐟 **摸鱼日历** - 节假日与重要日期正/倒计时，支持周休日与自定义日期
+- 🕰 **历史上的今天** - 历史上的今日事件（候选来源）
+- 🎲 **随机谜语** - 日报仅展示谜面，答题请使用聊天命令
+- 🎮 **小黑盒游戏** - 免费/折扣游戏与热门推荐
+- 💱 **实时汇率** - 支持自定义换算金额与币种
 
 ## 📝 更新日志
 
-- `1.3.1` - 安全与兼容性修复：移除硬编码 Token 改为配置项（api_token）、修复 Provider 回退 API 调用、移除废弃的 @register 装饰器、定时推送统一改用 context.send_message（跨平台）、移除 API 失败时的编造兜底数据、修复日志中泄露 Token 的问题、对齐配置默认值
-- 详细变更见 `CHANGELOG.md`
+### `1.4.0`
+
+- **配置边界统一**：插件配置只保留 API Key/Token、渲染、定时推送与 AI 问候语；日报布局与接口参数统一由日报编辑器维护。
+- **固定模块位支持接口参数**：中部模块1（今日追番）可配置 `date`；中部模块2（AI早报）可配置 `type`/`date`，人民日报可配置 `date`；参数会真实传入接口。
+- **编辑器增强**：固定模块位弹窗新增「配置接口」区域；模块类型改为由后端元数据驱动；底部引用恢复多选；自动保存失败时给出提示。
+- **修复重复渲染**：顶部来源选择每日英语时，不再同时出现在顶部面板和自由模块区。
+- **修复配置健壮性**：非法 `modules` / `moyu_items` / 倒计时条目不再导致生成失败；模块数量统一限制；移除诗词、语录等单条接口的无效条数配置。
+- **修复渲染**：顶部面板按实际类型使用对应样式与图标；汇率数据异常不再中断整张日报渲染。
+- **文档同步**：修正 Milora/ALAPI 说明、DPR 范围，统一版本号。
+
+### `1.3.1`
+
+- 支持固定模块位布局与候选来源；日报编辑器 Page 支持画布编辑与真实预览。
 
 ## 📄 许可证
 
@@ -138,9 +220,11 @@ playwright install chromium
 - [AstrBot](https://github.com/AstrBotDevs/AstrBot) - 优秀的机器人框架
 - [ALAPI](https://www.alapi.cn/) - 提供API服务
 - [Bangumi](https://bgm.tv/) - 番剧数据来源
+- [糖豆子](https://www.tangdouz.com/) - 免费汇率/游戏/一言/谜语接口
 
 ## 📮 反馈与建议
 
 如有问题或建议，欢迎提交 Issue 或 Pull Request！
 
 仓库地址：[https://github.com/Qiscard/astrbot_plugin_zhenxunribao](https://github.com/Qiscard/astrbot_plugin_zhenxunribao)
+

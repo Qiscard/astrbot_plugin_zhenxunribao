@@ -2,24 +2,33 @@
 毒鸡汤 API 处理模块
 用于获取每日毒鸡汤，供日报模板使用
 """
-import aiohttp
 from typing import Optional
 
+import aiohttp
+
 from astrbot.api import logger
+
+from .alapi_api import ALAPIClient
 from .base_api import BaseAPI
 
 
 class DujiAPI(BaseAPI):
     """毒鸡汤 API 处理类"""
 
-    def __init__(self, session: Optional[aiohttp.ClientSession] = None):
+    def __init__(
+        self,
+        session: Optional[aiohttp.ClientSession] = None,
+        token: str = "",
+    ):
         """
         初始化
 
         Args:
             session: 可选的 aiohttp.ClientSession，如果提供则复用
+            token: 可选的 ALAPI Token，留空则无鉴权（需在插件配置界面填写）
         """
         super().__init__(session)
+        self.alapi = ALAPIClient(session=session, token=token)
         # 使用 tangdouz 免费 API
         self.url = "https://api.tangdouz.com/djt.php"
         self.headers = {
@@ -29,6 +38,7 @@ class DujiAPI(BaseAPI):
     async def get_duji_async(self) -> Optional[str]:
         """
         异步方式获取毒鸡汤数据（推荐用于 AstrBot）
+        优先使用 tangdouz 免费 API，失败时回退到 ALAPI
 
         Returns:
             毒鸡汤文本，失败返回 None
@@ -47,10 +57,15 @@ class DujiAPI(BaseAPI):
                     text = text.strip()
                     logger.debug(f"成功获取毒鸡汤: {text[:50]}...")
                     return text
-                return None
         except Exception as e:
             logger.warning(f"毒鸡汤 API 请求失败: {e}")
-            return None
+
+        # 回退到 ALAPI
+        logger.info("免费毒鸡汤 API 失败，尝试使用 ALAPI 备用接口")
+        text = await self.alapi.get_soul()
+        if text:
+            return text
+        return None
 
     def parse_duji(self, api_data: Optional[str]) -> str:
         """
@@ -71,12 +86,12 @@ class DujiAPI(BaseAPI):
 
     def _get_default_duji(self) -> str:
         """
-        返回占位文案（当 API 失败时使用）
+        返回默认的毒鸡汤（当 API 失败时使用）
 
         Returns:
-            中性占位文案（不伪造真实内容）
+            默认毒鸡汤
         """
-        return "今天也要加油哦！"
+        return "靠运气赚来的钱，最终都会凭实力赔走，直到财富与认知匹配为止。"
 
     async def get_today_duji_async(self) -> str:
         """

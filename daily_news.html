@@ -191,6 +191,11 @@ body {
   display: grid;
   grid-template-columns: 1fr 1.5fr;
   gap: 22px;
+  align-items: start;
+}
+
+.lead-row--solo {
+  grid-template-columns: 1fr;
 }
 
 .panel {
@@ -323,6 +328,23 @@ body {
   margin: 0 auto;
 }
 
+.anime-img-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 84px;
+  height: 126px;
+  margin: 0 auto;
+  padding: 4px;
+  border-radius: 4px;
+  background: #e5aabe;
+  color: #fff;
+  font-size: 11px;
+  line-height: 1.3;
+  word-break: break-word;
+}
+
 .anime-text {
   min-height: 38px;  /* 改min-height替代height */
   height: auto;
@@ -358,6 +380,237 @@ body {
 
 .news-list li:last-child {
   margin-bottom: 0;
+}
+
+.english-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 4px;
+}
+
+.english-item {
+  color: var(--text-main);
+  font-family: var(--font-body);
+}
+
+.english-word-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.english-word {
+  color: var(--text-accent);
+  font-weight: 700;
+  font-size: 18px;
+  letter-spacing: 0.3px;
+}
+
+.english-phonetic {
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.english-trans {
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.english-trans em {
+  font-style: normal;
+  color: var(--text-accent);
+  font-weight: 700;
+  margin-right: 2px;
+}
+
+.english-example {
+  margin-top: 6px;
+  padding-left: 8px;
+  border-left: 3px solid rgba(229, 115, 145, 0.35);
+}
+
+.english-example-en {
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.english-example-cn {
+  margin-top: 2px;
+  color: var(--text-soft);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.essay-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.essay-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.essay-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.essay-content {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-main);
+}
+
+.essay-sub {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-soft);
+  text-align: right;
+}
+
+.aidaily-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.aidaily-meta {
+  font-size: 12px;
+  color: var(--text-soft);
+  margin-bottom: 2px;
+}
+
+.aidaily-list ul.news-list {
+  margin: 0;
+}
+
+.aidaily-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 10px;
+}
+
+.rmrbpdf-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 2px 2px;
+}
+
+.rmrbpdf-date {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.rmrbpdf-url {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-soft);
+  word-break: break-all;
+}
+
+.rmrbpdf-tip {
+  font-size: 12px;
+  color: var(--text-accent);
+}
+
+.cartoon-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.cartoon-meta {
+  font-size: 12px;
+  color: var(--text-soft);
+  margin-bottom: 2px;
+}
+
+.cartoon-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.cartoon-title {
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.cartoon-time {
+  color: var(--text-accent);
+  font-weight: 700;
+  flex: 0 0 auto;
+}
+
+.cartoon-update {
+  color: var(--text-soft);
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+.shici-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.shici-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.shici-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.shici-author {
+  font-size: 12px;
+  color: var(--text-soft);
+}
+
+.shici-content {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-main);
+  white-space: pre-line;
+}
+
+.yulu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.yulu-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.yulu-text {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-main);
+}
+
+.yulu-author {
+  font-size: 12px;
+  color: var(--text-soft);
+  text-align: right;
 }
 
 .quote-panel {
@@ -401,10 +654,255 @@ body {
   font-size: 10px;
   letter-spacing: 0.5px;
 }
+
+/* 实时汇率 */
+.exchange-list { display: flex; flex-direction: column; gap: 6px; }
+.exchange-row { display: flex; align-items: baseline; gap: 10px; }
+.exchange-amount { font-size: 16px; font-weight: 700; color: var(--text-main, #252630); }
+.exchange-eq { color: var(--text-soft); font-size: 14px; }
+.exchange-result { font-size: 20px; font-weight: 800; color: #e57391; }
+.exchange-meta { font-size: 11px; color: var(--text-soft); }
+.exchange-time { color: var(--text-soft); }
+
+/* 小黑盒游戏 */
+.hbox-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.hbox-card { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.hbox-cover { width: 100%; aspect-ratio: 3/4; border-radius: 8px; object-fit: cover; background: #e5aabe; }
+.hbox-cover-ph { width: 100%; aspect-ratio: 3/4; border-radius: 8px; background: #e5aabe; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; text-align: center; padding: 4px; }
+.hbox-name { font-size: 12px; line-height: 1.3; word-break: break-all; }
+.hbox-price { font-size: 11px; color: #e57391; font-weight: 700; }
+.hbox-price-free { font-size: 11px; color: #2f9e64; font-weight: 700; }
+
+/* 随机谜语 */
+.riddle-box { text-align: center; padding: 6px 4px; }
+.riddle-mimian { font-size: 17px; font-weight: 700; color: #e57391; line-height: 1.6; }
+.riddle-type { margin-top: 6px; font-size: 11px; color: var(--text-soft); }
     </style>
 </head>
 
 <body>
+    {% macro countdown_list(rows) %}
+        <div class="moyu-list">
+            {% for row in rows %}
+            <div class="moyu-item">
+                <span>距离</span>
+                <span class="holiday-name">{{ row.name }}</span>
+                {% if row.countup %}
+                <span>过了</span>
+                {% else %}
+                <span>还剩</span>
+                {% endif %}
+                <span class="holiday-days">{{ row.days }}</span>
+                <span>天</span>
+            </div>
+            {% endfor %}
+        </div>
+    {% endmacro %}
+
+    {% macro history_list(events) %}
+        <div class="history-list">
+            {% for event in events %}
+            <div class="history-item">
+                {% if event.year %}<span class="history-year">{{ event.year }}年</span>{% endif %}
+                <span>{{ event.title }}</span>
+            </div>
+            {% endfor %}
+        </div>
+    {% endmacro %}
+
+    {% macro anime_grid(items) %}
+        <div class="anime-grid">
+            {% for anime in items %}
+            <div class="anime-card">
+                {% if anime.image %}
+                <img src="{{ anime.image }}" class="anime-img" alt="{{ anime.title }}" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'84\' height=\'126\'%3E%3Crect fill=\'%23e5aabe\' width=\'84\' height=\'126\'/%3E%3Ctext x=\'50%25\' y=\'50%25\' text-anchor=\'middle\' dy=\'.3em\' fill=\'white\' font-size=\'12\'%3E图片%3C/text%3E%3C/svg%3E'">
+                {% else %}
+                <div class="anime-img anime-img-placeholder">{{ anime.title }}</div>
+                {% endif %}
+                <p class="anime-text">{{ anime.title }}</p>
+            </div>
+            {% endfor %}
+        </div>
+    {% endmacro %}
+
+    {% macro news_list(items) %}
+        <ul class="news-list">
+            {% for news in items %}
+            <li>{{ news }}</li>
+            {% endfor %}
+        </ul>
+    {% endmacro %}
+
+    {% macro english_list(items) %}
+        <div class="english-list">
+            {% for item in items %}
+            <div class="english-item">
+                <div class="english-word-row">
+                    <span class="english-word">{{ item.word }}</span>
+                    {% if item.phonetic %}<span class="english-phonetic">/{{ item.phonetic }}/</span>{% endif %}
+                </div>
+                {% if item.translations %}
+                <div class="english-trans">
+                    {% for t in item.translations %}
+                    <span>{% if t.pos %}<em>{{ t.pos }}.</em> {% endif %}{{ t.tran_cn }}</span>
+                    {% endfor %}
+                </div>
+                {% endif %}
+                {% if item.example_en %}
+                <div class="english-example">
+                    <div class="english-example-en">{{ item.example_en }}</div>
+                    {% if item.example_cn %}<div class="english-example-cn">{{ item.example_cn }}</div>{% endif %}
+                </div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+    {% endmacro %}
+
+    {% macro essay_list(items) %}
+        <div class="essay-list">
+            {% for item in items %}
+            <div class="essay-item">
+                <div class="essay-title">{{ item.title }}</div>
+                {% if item.content %}
+                <div class="essay-content">{{ item.content }}</div>
+                {% endif %}
+                {% if item.desc and item.desc != 'None' %}<div class="essay-sub">{{ item.desc }}</div>{% endif %}
+                {% if item.up_date %}<div class="essay-sub">{{ item.up_date }}</div>{% endif %}
+            </div>
+            {% endfor %}
+        </div>
+    {% endmacro %}
+
+    {% macro aidaily_block(data) %}
+        <div class="aidaily-list">
+            {% if data.date %}<div class="aidaily-meta">{{ data.date }}</div>{% endif %}
+            {% if data.type == 'image' and data.image_url %}
+            <img class="aidaily-image" src="{{ data.image_url }}" alt="AI早报" onerror="this.style.display='none'">
+            {% else %}
+            <ul class="news-list">
+                {# data['items']：避免与 dict.items 方法冲突 #}
+                {% for item in data['items'] %}
+                <li>{{ item }}</li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+        </div>
+    {% endmacro %}
+
+    {% macro rmrbpdf_block(data) %}
+        <div class="rmrbpdf-box">
+            {% if data.date %}<div class="rmrbpdf-date">{{ data.date }} 人民日报</div>{% endif %}
+            <div class="rmrbpdf-tip">今日电子版 PDF</div>
+            {% if data.url %}<div class="rmrbpdf-url">{{ data.url }}</div>{% endif %}
+        </div>
+    {% endmacro %}
+
+    {% macro cartoon_block(data) %}
+        <div class="cartoon-list">
+            {% if data.today_week %}<div class="cartoon-meta">{{ data.today_week }} 更新</div>{% endif %}
+            {% for it in data['items'] %}
+            <div class="cartoon-item">
+                <span class="cartoon-title">{{ it.title }}</span>
+                {% if it.up_time %}<span class="cartoon-time">{{ it.up_time }}</span>{% endif %}
+                {% if it.up_date %}<span class="cartoon-update">{{ it.up_date }}</span>{% endif %}
+            </div>
+            {% endfor %}
+        </div>
+    {% endmacro %}
+
+    {% macro shici_list(items) %}
+        <div class="shici-list">
+            {% for item in items %}
+            <div class="shici-item">
+                <div class="shici-title">{{ item.title }}</div>
+                {% if item.author %}<div class="shici-author">{{ item.author }}{% if item.dynasty %}·{{ item.dynasty }}{% endif %}</div>{% endif %}
+                {% if item.content %}
+                <div class="shici-content">{{ item.content }}</div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+    {% endmacro %}
+
+    {% macro yulu_list(items) %}
+        <div class="yulu-list">
+            {% for item in items %}
+            <div class="yulu-item">
+                <div class="yulu-text">" {{ item.text }} "</div>
+                {% if item.author %}<div class="yulu-author">—— {{ item.author }}{% if item.from %}《{{ item.from }}》{% endif %}</div>{% endif %}
+            </div>
+            {% endfor %}
+        </div>
+    {% endmacro %}
+
+    {% macro hbox_grid(games) %}
+        <div class="hbox-list">
+            {% for g in games %}
+            <div class="hbox-card">
+                {% if g.image %}
+                <img src="{{ g.image }}" class="hbox-cover" alt="{{ g.name }}" onerror="this.style.display='none'">
+                {% else %}
+                <div class="hbox-cover-ph">{{ g.name }}</div>
+                {% endif %}
+                <div class="hbox-name">{{ g.name }}</div>
+                {% if g.is_free %}
+                <div class="hbox-price-free">免费</div>
+                {% elif g.price_current is not none %}
+                <div class="hbox-price">
+                    {% if g.discount %}-{{ g.discount }}% {% endif %}¥{{ g.price_current }}
+                </div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+    {% endmacro %}
+
+    {% macro exchange_block(data) %}
+        <div class="exchange-list">
+            <div class="exchange-row">
+                <span class="exchange-amount">{{ data.amount }} {{ data.from }}</span>
+                <span class="exchange-eq">≈</span>
+                <span class="exchange-result">{{ "%.2f"|format(data.result) }} {{ data.to }}</span>
+            </div>
+            <div class="exchange-meta">
+                参考汇率 1 {{ data.from }} = {{ "%.4f"|format(data.rate) }} {{ data.to }}
+                {% if data.update_time %}<span class="exchange-time">（{{ data.update_time }}）</span>{% endif %}
+            </div>
+        </div>
+    {% endmacro %}
+
+    {% macro module_panel(mod, variant) %}
+        <div class="panel {% if variant == 'section' %}section-panel {% endif %}{{ mod.type }}-panel">
+            <div class="panel-tag"><img src="{{ icons.get(mod.type, './res/icon/game.png') }}" alt="{{ mod.title }}" onerror="this.style.display='none'">{{ mod.title }}</div>
+            {% if mod.type == 'anime' %}
+                {{ anime_grid(mod.data) }}
+            {% elif mod.type == 'news' %}
+                {{ news_list(mod.data) }}
+            {% elif mod.type == 'countdown' %}
+                {{ countdown_list(mod.data) }}
+            {% elif mod.type == 'english' %}
+                {{ english_list(mod.data) }}
+            {% elif mod.type == 'essay' %}
+                {{ essay_list(mod.data) }}
+            {% elif mod.type == 'aidaily' %}
+                {{ aidaily_block(mod.data) }}
+            {% elif mod.type == 'rmrbpdf' %}
+                {{ rmrbpdf_block(mod.data) }}
+            {% elif mod.type == 'cartoon' %}
+                {{ cartoon_block(mod.data) }}
+            {% elif mod.type == 'shici' %}
+                {{ shici_list(mod.data) }}
+            {% elif mod.type == 'yulu' %}
+                {{ yulu_list(mod.data) }}
+            {% elif mod.type == 'exchange' %}
+                {{ exchange_block(mod.data) }}
+            {% elif mod.type == 'hbox' %}
+                {{ hbox_grid(mod.data) }}
+            {% endif %}
+        </div>
+    {% endmacro %}
+
     <div class="wrapper">
         <div class="main">
             <div class="header">
@@ -422,78 +920,49 @@ body {
                 </div>
             </div>
 
-            <div class="lead-row">
+            {% if moyu_rows or top_view %}
+            <div class="lead-row{% if not (moyu_rows and top_view) %} lead-row--solo{% endif %}">
+                {% if moyu_rows %}
                 <div class="panel moyu-panel">
-                    <div class="panel-tag"><img src="./res/icon/fish.png" alt="摸鱼" onerror="this.style.display='none'">摸鱼日历</div>
-                    <div class="moyu-list">
-                        {% for item in moyu_list %}
-                        <div class="moyu-item">
-                            <span>距离</span>
-                            <span class="holiday-name">{{ item.name }}</span>
-                            <span>还剩</span>
-                            <span class="holiday-days">{{ item.days_left }}</span>
-                            <span>天</span>
-                        </div>
-                        {% else %}
-                        <div class="moyu-item"><span>暂未获取到节假日数据</span></div>
-                        {% endfor %}
-                    </div>
+                    <div class="panel-tag"><img src="./res/icon/fish.png" alt="摸鱼" onerror="this.style.display='none'">{{ moyu_title }}</div>
+                    {{ countdown_list(moyu_rows) }}
                 </div>
-
-                <div class="panel history-panel">
-                    <div class="panel-tag"><img src="./res/icon/game.png" alt="历史" onerror="this.style.display='none'">历史上的今天</div>
-                    <div class="history-list">
-                        {% for event in history_events %}
-                        <div class="history-item">
-                            <span class="history-year">{{ event.year }}年</span>
-                            <span>{{ event.title }}</span>
-                        </div>
-                        {% else %}
-                        <div class="history-item"><span>暂未获取到历史事件数据</span></div>
-                        {% endfor %}
-                    </div>
-                </div>
-            </div>
-
-            <div class="panel section-panel anime-panel">
-                <div class="panel-tag"><img src="./res/icon/bgm.png" alt="新番" onerror="this.style.display='none'">今日新番</div>
-                <div class="anime-grid">
-                    {% for anime in anime_list %}
-                    <div class="anime-card">
-                        <img src="{{ anime.image }}" class="anime-img" alt="{{ anime.title }}" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'84\' height=\'126\'%3E%3Crect fill=\'%23e5aabe\' width=\'84\' height=\'126\'/%3E%3Ctext x=\'50%25\' y=\'50%25\' text-anchor=\'middle\' dy=\'.3em\' fill=\'white\' font-size=\'12\'%3E图片%3C/text%3E%3C/svg%3E'">
-                        <p class="anime-text">{{ anime.title }}</p>
-                    </div>
-                    {% else %}
-                    <p class="anime-text">今日暂无新番数据</p>
-                    {% endfor %}
-                </div>
-            </div>
-
-            <div class="panel section-panel news-panel">
-                <div class="panel-tag"><img src="./res/icon/60.png" alt="60s读懂世界" onerror="this.style.display='none'">60s读懂世界</div>
-                <ul class="news-list">
-                    {% for news in world_news %}
-                    <li>{{ news }}</li>
-                    {% else %}
-                    <li>暂未获取到新闻数据，请稍后再试</li>
-                    {% endfor %}
-                </ul>
-            </div>
-
-            <div class="panel section-panel quote-panel">
-                {% if quote_mode == 'duji' %}
-                <div class="panel-tag"><img src="./res/icon/hitokoto.png" alt="毒鸡汤" onerror="this.style.display='none'">毒鸡汤</div>
-                <div class="quote-box">
-                    <p class="quote-text">" {{ duji_text }} "</p>
-                </div>
-                {% else %}
-                <div class="panel-tag"><img src="./res/icon/hitokoto.png" alt="今日一言" onerror="this.style.display='none'">今日一言</div>
-                <div class="quote-box">
-                    <p class="quote-text">" {{ hitokoto_data.hitokoto }} "</p>
-                    <span class="quote-from">—— {{ hitokoto_data.from }}</span>
+                {% endif %}
+                {% if top_view %}
+                <div class="panel {{ top_view.type }}-panel">
+                    <div class="panel-tag"><img src="{{ icons.get(top_view.type, './res/icon/game.png') }}" alt="{{ top_view.title }}" onerror="this.style.display='none'">{{ top_view.title }}</div>
+                    {% if top_view.type == 'history' %}
+                        {{ history_list(top_view.events) }}
+                    {% elif top_view.type == 'english' %}
+                        {{ english_list(top_view.data) }}
+                    {% elif top_view.type == 'exchange' %}
+                        {{ exchange_block(top_view.data) }}
+                    {% endif %}
                 </div>
                 {% endif %}
             </div>
+            {% endif %}
+
+            {% for mod in other_modules %}
+            {{ module_panel(mod, 'section') }}
+            {% endfor %}
+
+            {% if quote %}
+            <div class="panel section-panel quote-panel">
+                <div class="panel-tag"><img src="./res/icon/hitokoto.png" alt="{{ quote.title }}" onerror="this.style.display='none'">{{ quote.title }}</div>
+                {% if quote.is_riddle %}
+                <div class="riddle-box">
+                    <p class="riddle-mimian">{{ quote.text }}</p>
+                    {% if quote.from %}<div class="riddle-type">（{{ quote.from }}）</div>{% endif %}
+                </div>
+                {% else %}
+                <div class="quote-box">
+                    <p class="quote-text">" {{ quote.text }} "</p>
+                    {% if quote.from %}<span class="quote-from">—— {{ quote.from }}</span>{% endif %}
+                </div>
+                {% endif %}
+            </div>
+            {% endif %}
 
             <div class="footer-note">OPQ OSC MAHIRO © 2023</div>
         </div>

@@ -1,12 +1,13 @@
 import asyncio
 import base64
+import copy
 import json
+import os
 import random
 import re
+import tempfile
 import uuid
 from datetime import datetime, time
-from pathlib import Path
-from tempfile import gettempdir
 from urllib.request import pathname2url
 
 import aiohttp
@@ -14,16 +15,277 @@ from jinja2 import Template
 from playwright.async_api import async_playwright
 
 from astrbot.api import AstrBotConfig, logger
-from astrbot.api.event import MessageChain, filter, AstrMessageEvent
+from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.star import Context, Star, StarTools
 
+try:
+    from astrbot.api.web import json_response
+    from astrbot.api.web import request as web_request
+except ModuleNotFoundError:
+    # 兼容未提供 astrbot.api.web 的旧版本：直接用 Quart 原语
+    from quart import jsonify
+    from quart import request as web_request
+
+    def json_response(data=None, *, status_code=200):
+        resp = jsonify(data)
+        resp.status_code = status_code
+        return resp
+
+
+from .api.aa1_api import AA1API
+from .api.alapi_api import ALAPIClient
 from .api.bgm_api import BGMAPI
-from .api.date_utils import get_current_date_info
+from .api.date_utils import days_until_date, days_until_weekday, get_current_date_info
+from .api.duji_api import DujiAPI
+from .api.english_api import EnglishAPI
+from .api.history_api import HistoryAPI
 from .api.hitokoto_api import HitokotoAPI
 from .api.holiday_api import HolidayAPI
+from .api.milora_api import MiloraAPI
+from .api.tangdouz_api import TangdouzAPI
+from .api.xiaoapi_api import XiaoapiAPI
 from .api.zaobao_api import ZaobaoAPI
-from .api.history_api import HistoryAPI
-from .api.duji_api import DujiAPI
+
+# 可自由排序的模块类型（摸鱼日历/历史上的今天/底栏引用为固定面板，不在此列）
+# slots 预留后续“顶部/底部/自由区”约束；render 对应模板宏类型
+MODULE_TYPE_META = {
+    "anime": {
+        "title": "今日新番",
+        "count": 4,
+        "icon": "./res/icon/bgm.png",
+        "slots": ["body"],
+        "render": "anime",
+        "has_count": True,
+    },
+    "news": {
+        "title": "60s读懂世界",
+        "count": 10,
+        "icon": "./res/icon/60.png",
+        "slots": ["body"],
+        "render": "news",
+        "has_count": True,
+    },
+    "countdown": {
+        "title": "自定义倒计时",
+        "count": 0,
+        "icon": "./res/icon/fish.png",
+        "slots": ["body", "lead"],
+        "render": "countdown",
+        "has_items": True,
+    },
+    "english": {
+        "title": "每日英语",
+        "count": 1,
+        "icon": "./res/icon/hitokoto.png",
+        "slots": ["body"],
+        "render": "english",
+        "has_count": True,
+    },
+    "essay": {
+        "title": "每日一文",
+        "count": 1,
+        "icon": "./res/icon/game.png",
+        "slots": ["body"],
+        "render": "essay",
+        "has_count": True,
+    },
+    "aidaily": {
+        "title": "AI早报",
+        "count": 10,
+        "icon": "./res/icon/60.png",
+        "slots": ["body"],
+        "render": "aidaily",
+        "has_count": True,
+    },
+    "rmrbpdf": {
+        "title": "每日人民日报",
+        "count": 0,
+        "icon": "./res/icon/game.png",
+        "slots": ["body"],
+        "render": "rmrbpdf",
+    },
+    "cartoon": {
+        "title": "今日追番",
+        "count": 6,
+        "icon": "./res/icon/bgm.png",
+        "slots": ["body"],
+        "render": "cartoon",
+        "has_count": True,
+    },
+    "shici": {
+        "title": "每日诗词",
+        "count": 1,
+        "icon": "./res/icon/game.png",
+        "slots": ["body"],
+        "render": "shici",
+    },
+    "yulu": {
+        "title": "语录",
+        "count": 1,
+        "icon": "./res/icon/hitokoto.png",
+        "slots": ["body"],
+        "render": "yulu",
+    },
+}
+
+DEFAULT_MODULE_TITLES = {k: v["title"] for k, v in MODULE_TYPE_META.items()}
+DEFAULT_MODULE_COUNTS = {
+    k: v["count"] for k, v in MODULE_TYPE_META.items() if v.get("has_count")
+}
+MODULE_ICONS = {k: v["icon"] for k, v in MODULE_TYPE_META.items()}
+
+# 各模块可配置的接口请求参数（编辑器「配置接口」面板）。
+# key 为模块类型；value 为字段定义列表，供前端渲染表单与后端读取。
+# 仅存放“业务请求参数”，key/token 等鉴权仍放在插件配置界面。
+MODULE_PARAM_SCHEMA = {
+    "aidaily": [
+        {
+            "key": "type",
+            "label": "返回格式",
+            "type": "select",
+            "options": [
+                {"value": "txt", "label": "纯文本"},
+                {"value": "md", "label": "Markdown"},
+                {"value": "image", "label": "渲染图"},
+            ],
+            "default": "txt",
+        },
+        {
+            "key": "date",
+            "label": "日期",
+            "type": "text",
+            "placeholder": "YYYY-MM-DD，留空当天",
+            "default": "",
+        },
+    ],
+    "rmrbpdf": [
+        {
+            "key": "date",
+            "label": "日期",
+            "type": "text",
+            "placeholder": "YYYY-MM-DD，留空当天",
+            "default": "",
+        },
+    ],
+    "cartoon": [
+        {
+            "key": "date",
+            "label": "日期",
+            "type": "text",
+            "placeholder": "YYYYMMDD，留空当天",
+            "default": "",
+        },
+    ],
+    "shici": [
+        {
+            "key": "keyword",
+            "label": "诗词关键词",
+            "type": "text",
+            "placeholder": "如：静夜思",
+            "default": "静夜思",
+        },
+    ],
+    "yulu": [
+        {
+            "key": "type",
+            "label": "语录类型",
+            "type": "select",
+            "options": [
+                {"value": "", "label": "随机"},
+                {"value": "经典", "label": "经典"},
+                {"value": "动漫", "label": "动漫"},
+                {"value": "恋爱", "label": "恋爱"},
+                {"value": "鼓励", "label": "鼓励"},
+                {"value": "孤独", "label": "孤独"},
+                {"value": "搞笑", "label": "搞笑"},
+                {"value": "友情", "label": "友情"},
+                {"value": "歌词", "label": "歌词"},
+            ],
+            "default": "",
+        },
+    ],
+}
+
+# 底栏短句来源：显示名与默认标题
+QUOTE_SOURCE_LABELS = {
+    "hitokoto": "今日一言",
+    "duji": "毒鸡汤",
+    "mingyan": "名人名言",
+    "tiangou": "舔狗日记",
+    "gaoxiao": "搞笑语录",
+    "xiehouyu": "歇后语",
+    "sjyy": "随机一言",
+    "riddle": "随机谜语",
+}
+
+# 顶部模块候选来源（单选）：历史上的今天 / 每日英语 / 实时汇率
+TOP_SOURCE_LABELS = {
+    "history": "历史上的今天",
+    "english": "每日英语",
+    "exchange": "实时汇率",
+}
+
+# 中部模块1候选来源（单选，番剧/游戏）
+MID1_SOURCE_LABELS = {
+    "anime": "今日新番",
+    "cartoon": "今日追番",
+    "hbox": "小黑盒游戏",
+}
+
+# 中部模块2候选来源（单选，新闻/资讯）
+MID2_SOURCE_LABELS = {
+    "news": "60s读懂世界",
+    "aidaily": "AI早报",
+    "rmrbpdf": "每日人民日报",
+}
+
+# modules.json 不存在时写入的默认配置
+DEFAULT_MODULE_CONFIG = {
+    "moyu_title": "摸鱼日历",
+    # 摸鱼日历固定展示在左上角，按顺序展示计时项（最多 10 条）
+    # 类型：holiday=下一个法定节假日；custom=自定义计时(YYYY-MM-DD 一次性 / MM-DD 每年循环)；
+    #      weekly=周休日（按周期）
+    "moyu_items": [
+        {"type": "holiday"},
+        {"type": "holiday"},
+        {"type": "holiday"},
+        {"type": "weekly", "name": "周休日", "weekday": 6},
+        {"type": "custom", "name": "元旦", "date": "01-01"},
+    ],
+    # 历史上的今天固定展示在摸鱼日历右侧
+    "history_enabled": True,
+    "history_title": "历史上的今天",
+    "history_count": 4,
+    # 顶部模块：与摸鱼日历同行，从候选来源中单选一个展示
+    # （history/english/exchange；history_* 字段为 history 来源的参数）
+    "top_source": "history",
+    "top_params": {},
+    # 中部模块1：番剧/游戏类，单选
+    "mid1_source": "anime",
+    "mid1_title": "今日新番",
+    "mid1_count": 4,
+    "mid1_params": {},
+    # 中部模块2：新闻/资讯类，单选
+    "mid2_source": "news",
+    "mid2_title": "60s读懂世界",
+    "mid2_count": 10,
+    "mid2_params": {},
+    # 实时汇率参数
+    "exchange_from": "USD",
+    "exchange_to": "CNY",
+    "exchange_amount": 100,
+    # 底栏引用固定展示在日报底部，quote_sources 可多选（每次随机取其一）
+    "quote_enabled": True,
+    "quote_title": "",
+    "quote_sources": ["hitokoto"],
+    # 其余模块按列表顺序纵向排列
+    "modules": [
+        {"type": "anime", "enabled": True, "title": "今日新番", "count": 4},
+        {"type": "news", "enabled": True, "title": "60s读懂世界", "count": 10},
+        {"type": "english", "enabled": True, "title": "每日英语", "count": 1},
+    ],
+}
+
 
 
 class ZhenxunReportPlugin(Star):
@@ -41,116 +303,727 @@ class ZhenxunReportPlugin(Star):
         super().__init__(context)
         self.config = config
 
-        self.plugin_dir = Path(__file__).parent.resolve()
-        self.template_path = self.plugin_dir / "daily_news.html"
+        plugin_dir = os.path.dirname(os.path.abspath(__file__))
+        self.template_path = os.path.join(plugin_dir, "daily_news.html")
+        self.plugin_dir = plugin_dir
+        self.data_dir = StarTools.get_data_dir("astrbot_plugin_zhenxunribao")
 
-        # Shared aiohttp session for all API clients
+        # 创建共享的 aiohttp ClientSession，供所有 API 类复用
+        # 设置连接级超时，防止 TCP 握手阶段无限挂起
         timeout = aiohttp.ClientTimeout(total=30, connect=10, sock_connect=10)
         self.http_session = aiohttp.ClientSession(timeout=timeout)
 
-        api_token = str(config.get("api_token", "") or "").strip()
         self.bgm_api = BGMAPI(session=self.http_session)
-        self.hitokoto_api = HitokotoAPI(session=self.http_session, token=api_token)
-        self.holiday_api = HolidayAPI(session=self.http_session, token=api_token)
-        self.zaobao_api = ZaobaoAPI(session=self.http_session, token=api_token)
-        self.history_api = HistoryAPI(session=self.http_session, token=api_token)
-        self.duji_api = DujiAPI(session=self.http_session)
+        self.alapi_token = str(config.get("alapi_token", "") or "").strip()
+        self.alapi = ALAPIClient(session=self.http_session, token=self.alapi_token)
+        self.hitokoto_api = HitokotoAPI(session=self.http_session, token=self.alapi_token)
+        self.holiday_api = HolidayAPI(
+            session=self.http_session, token=self.alapi_token
+        )
+        self.zaobao_api = ZaobaoAPI(session=self.http_session, token=self.alapi_token)
+        self.history_api = HistoryAPI(
+            session=self.http_session, token=self.alapi_token
+        )
+        self.duji_api = DujiAPI(session=self.http_session, token=self.alapi_token)
+        self.aa1_api = AA1API(session=self.http_session)
+        self.english_api = EnglishAPI(session=self.http_session)
+        # Milora：key 仅来自插件配置；业务请求参数（type/date）在编辑器按模块配置
+        self.milora_api = MiloraAPI(
+            session=self.http_session,
+            api_key=str(config.get("milora_api_key", "") or "").strip(),
+        )
+        self.xiaoapi_api = XiaoapiAPI(session=self.http_session)
+        self.tangdouz_api = TangdouzAPI(session=self.http_session)
 
         self.push_task = None
 
-        # Group id -> unified_msg_origin mapping, learned from /日报 usage
+        # 猜灯谜：uid -> 当前灯谜 id（用于作答校验）
+        self._riddle_state = {}
+
+        # 群号到 unified_msg_origin 的映射，用于定时推送
         self.group_umo_mapping = {}
         self._load_group_mapping()
 
-        if config.get("enable_scheduled_push", False):
-            self.push_task = asyncio.create_task(self._scheduled_push_task())
-            logger.info("Scheduled push task initialized")
+        # 注册日报编辑器 Page 的 Web API
+        self._register_web_apis(context)
 
-        logger.info("Zhenxun daily report plugin loaded")
+        # 启动定时推送任务（使用延迟启动，等待平台适配器就绪）
+        if config.get("enable_scheduled_push", False):
+            asyncio.create_task(self._delayed_start_scheduler())
+            logger.info("定时推送任务正在初始化...")
+
+        logger.info("真寻日报插件已加载")
+
+    async def _delayed_start_scheduler(self):
+        """延迟启动定时推送调度器"""
+        try:
+            # 等待 15 秒让系统完全初始化
+            await asyncio.sleep(15)
+
+            # 取消已存在的旧任务（防止重复）
+            if self.push_task and not self.push_task.done():
+                self.push_task.cancel()
+                try:
+                    await self.push_task
+                except asyncio.CancelledError:
+                    pass
+
+            # 确保 HTTP session 可用
+            if self.http_session is None or self.http_session.closed:
+                timeout = aiohttp.ClientTimeout(total=30, connect=10, sock_connect=10)
+                self.http_session = aiohttp.ClientSession(timeout=timeout)
+                # 重新初始化 API 客户端的 session
+                self._reinit_api_sessions()
+
+            self.push_task = asyncio.create_task(self._scheduled_push_task())
+            logger.info("定时推送任务已启动（延迟初始化）")
+        except Exception as e:
+            logger.error(f"启动定时推送任务失败: {e}", exc_info=True)
+
+    def _reinit_api_sessions(self):
+        """重新初始化 API 客户端的 session"""
+        self.bgm_api.set_session(self.http_session)
+        self.alapi.set_session(self.http_session)
+        self.hitokoto_api.set_session(self.http_session)
+        self.holiday_api.set_session(self.http_session)
+        self.zaobao_api.set_session(self.http_session)
+        self.history_api.set_session(self.http_session)
+        self.duji_api.set_session(self.http_session)
+        self.aa1_api.set_session(self.http_session)
+        self.english_api.set_session(self.http_session)
+        self.milora_api.set_session(self.http_session)
+        self.xiaoapi_api.set_session(self.http_session)
+        self.tangdouz_api.set_session(self.http_session)
 
     @filter.command("日报")
     async def daily_news(self, event: AstrMessageEvent):
-        """Generate and send today's daily report image."""
+        """生成日报"""
+        # 输出 unified_msg_origin 并自动保存映射
         umo = event.unified_msg_origin
-        logger.info(f"Daily report triggered, unified_msg_origin: {umo}")
+        logger.info(f"日报命令触发，unified_msg_origin: {umo}")
 
-        # Auto-learn the group's unified_msg_origin for scheduled push
+        # 自动学习群组的 unified_msg_origin
         group_id = self._extract_group_id(umo)
         if group_id and group_id not in self.group_umo_mapping:
             self.group_umo_mapping[group_id] = umo
             self._save_group_mapping()
-            logger.info(f"Learned unified_msg_origin for group {group_id}: {umo}")
+            logger.info(f"已学习群组 {group_id} 的 unified_msg_origin: {umo}")
 
         image_path = None
         try:
             image_path = await self._generate_daily_image()
             yield event.image_result(image_path)
         except Exception as e:
-            logger.error(f"Failed to generate daily report: {e}", exc_info=True)
+            logger.error(f"生成日报时出错: {e}", exc_info=True)
             yield event.plain_result(f"生成日报时出错: {str(e)}")
         finally:
-            if image_path and Path(image_path).exists():
+            # 清理临时图片文件
+            if image_path and os.path.exists(image_path):
                 try:
-                    Path(image_path).unlink()
-                    logger.debug(f"Cleaned up temp image: {image_path}")
+                    os.remove(image_path)
+                    logger.debug(f"已清理临时图片文件: {image_path}")
                 except Exception as e:
-                    logger.warning(f"Failed to clean up temp image: {e}")
+                    logger.warning(f"清理临时图片文件失败: {e}")
 
     @filter.command("日报群组ID")
     async def get_group_id(self, event: AstrMessageEvent):
-        """Show the current session's unified_msg_origin for push config."""
+        """获取当前会话的群组ID，用于配置定时推送"""
         umo = event.unified_msg_origin
-        logger.info(f"Query unified_msg_origin: {umo}")
+        logger.info(f"获取群组ID，unified_msg_origin: {umo}")
         yield event.plain_result(
             f"📋 当前会话信息：\n"
             f"unified_msg_origin: {umo}\n\n"
             f"💡 请将此值添加到插件配置的「定时推送目标群组列表」中"
         )
 
-    async def _generate_daily_image(self) -> str:
-        """Fetch data, render the HTML template and screenshot it to a PNG.
+    @filter.command("歇后语")
+    async def xiehouyu(self, event: AstrMessageEvent):
+        """获取一条随机歇后语（ALAPI 接口）"""
+        try:
+            data = await self.alapi.get_xiehouyu()
+            if data and data.get("riddle"):
+                yield event.plain_result(
+                    f"🔮 {data['riddle']}\n👉 {data.get('answer', '')}"
+                )
+            else:
+                yield event.plain_result("❌ 歇后语获取失败，请稍后再试")
+        except Exception as e:
+            logger.error(f"歇后语获取失败: {e}", exc_info=True)
+            yield event.plain_result(f"❌ 歇后语获取失败: {e}")
+
+    @filter.command("AI早报")
+    async def milora_aidaily_cmd(self, event: AstrMessageEvent):
+        """获取 Milora AI早报，使用命令默认参数，不读取日报模块配置。"""
+        try:
+            data = await self.milora_api.get_aidaily(max_count=12)
+            if not data:
+                yield event.plain_result("❌ AI早报获取失败，请稍后再试")
+                return
+            if data.get("type") == "image" and data.get("image_url"):
+                yield event.plain_result(
+                    f"📰 AI早报 {data.get('date') or ''}\n{data['image_url']}"
+                )
+                return
+            lines = data.get("items") or []
+            head = f"📰 AI早报 {data.get('date') or ''}".strip()
+            body = "\n".join(f"{i + 1}. {t}" for i, t in enumerate(lines))
+            yield event.plain_result(f"{head}\n{body}" if body else head)
+        except Exception as e:
+            logger.error(f"AI早报获取失败: {e}", exc_info=True)
+            yield event.plain_result(f"❌ AI早报获取失败: {e}")
+
+    @filter.command("人民日报")
+    async def milora_rmrb_cmd(self, event: AstrMessageEvent):
+        """获取每日人民日报 PDF，使用命令默认日期。"""
+        try:
+            data = await self.milora_api.get_rmrbpdf()
+            if data and data.get("url"):
+                yield event.plain_result(
+                    f"📰 人民日报 {data.get('date') or ''}\n{data['url']}"
+                )
+            else:
+                yield event.plain_result("❌ 人民日报获取失败，请稍后再试")
+        except Exception as e:
+            logger.error(f"人民日报获取失败: {e}", exc_info=True)
+            yield event.plain_result(f"❌ 人民日报获取失败: {e}")
+
+    @filter.command("追番")
+    async def cartoon_cmd(self, event: AstrMessageEvent):
+        """获取腾讯动漫今日更新列表。"""
+        try:
+            data = await self.xiaoapi_api.get_cartoon_updates()
+            if not data or not data.get("items"):
+                yield event.plain_result("❌ 今日追番获取失败，请稍后再试")
+                return
+            head = f"🎬 今日追番 {data.get('today') or ''}（{data.get('today_week') or ''}）"
+            lines = [
+                f"{i + 1}. {it['title']}（{it.get('type') or ''}）"
+                f"{(' ' + it.get('up_time') or '') if it.get('up_time') else ''}"
+                for i, it in enumerate(data["items"])
+            ]
+            yield event.plain_result(f"{head}\n" + "\n".join(lines))
+        except Exception as e:
+            logger.error(f"追番获取失败: {e}", exc_info=True)
+            yield event.plain_result(f"❌ 追番获取失败: {e}")
+
+    @filter.command("诗词")
+    async def shici_cmd(self, event: AstrMessageEvent, keyword: str = ""):
+        """搜索并返回一首诗词。"""
+        kw = (keyword or "").strip() or "静夜思"
+        try:
+            data = await self.xiaoapi_api.get_shici(kw)
+            if not data:
+                yield event.plain_result(f"❌ 没找到「{kw}」相关诗词")
+                return
+            author = data.get("author") or ""
+            dynasty = data.get("dynasty") or ""
+            head = f"📜 {data['title']}"
+            if author:
+                head += f"　{author}" + (f"·{dynasty}" if dynasty else "")
+            yield event.plain_result(f"{head}\n{data.get('content') or ''}")
+        except Exception as e:
+            logger.error(f"诗词获取失败: {e}", exc_info=True)
+            yield event.plain_result(f"❌ 诗词获取失败: {e}")
+
+    @filter.command("语录")
+    async def yulu_cmd(self, event: AstrMessageEvent, keyword: str = ""):
+        """获取一条语录，可选类型：经典/动漫/恋爱/鼓励/孤独/搞笑/友情/歌词。"""
+        t = (keyword or "").strip()
+        try:
+            data = await self.xiaoapi_api.get_yulu(t)
+            if not data:
+                yield event.plain_result("❌ 语录获取失败，请稍后再试")
+                return
+            text = data["text"]
+            author = data.get("author") or ""
+            from_ = data.get("from") or ""
+            tail = author
+            if from_:
+                tail = f"{author}《{from_}》" if author else f"《{from_}》"
+            yield event.plain_result(f"💬 {text}\n—— {tail}" if tail else f"💬 {text}")
+        except Exception as e:
+            logger.error(f"语录获取失败: {e}", exc_info=True)
+            yield event.plain_result(f"❌ 语录获取失败: {e}")
+
+    @filter.command("答题")
+    async def quiz_cmd(self, event: AstrMessageEvent, keyword: str = ""):
+        """知识答题：发送「答题」开始，发送「答题 我答+选项」作答。"""
+        uid = str(event.unified_msg_origin or "default")
+        msg = (keyword or "").strip() or "开始游戏"
+        try:
+            data = await self.xiaoapi_api.quiz_action(uid, msg)
+            if not data:
+                yield event.plain_result("❌ 答题获取失败，请稍后再试")
+                return
+            reply = data.get("msg") or ""
+            if data.get("option"):
+                reply += "\n" + data["option"]
+            yield event.plain_result(f"🧠 {reply}")
+        except Exception as e:
+            logger.error(f"答题获取失败: {e}", exc_info=True)
+            yield event.plain_result(f"❌ 答题获取失败: {e}")
+
+    @filter.command("灯谜")
+    async def riddle_cmd(self, event: AstrMessageEvent, keyword: str = ""):
+        """猜灯谜：发送「灯谜」随机出题，发送「灯谜 答案」作答。"""
+        uid = str(event.unified_msg_origin or "default")
+        kw = (keyword or "").strip()
+        try:
+            if not kw:
+                data = await self.xiaoapi_api.riddle_random(uid)
+                if not data:
+                    yield event.plain_result("❌ 灯谜获取失败，请稍后再试")
+                    return
+                self._riddle_state[uid] = data["id"]
+                yield event.plain_result(
+                    f"🏮 灯谜：{data['title']}\n（难度：{data.get('difficulty') or '未知'}）\n回复「灯谜 你的答案」作答"
+                )
+                return
+            rid = self._riddle_state.get(uid)
+            if rid is None:
+                yield event.plain_result("❌ 请先发送「灯谜」开始")
+                return
+            data = await self.xiaoapi_api.riddle_verify(uid, rid, kw)
+            if not data:
+                yield event.plain_result("❌ 作答失败，请稍后再试")
+                return
+            if data["is_correct"]:
+                reply = "🎉 答对啦！"
+            else:
+                reply = f"❌ 答错啦，正确答案是：{data['correct_answer']}"
+            if data.get("msg"):
+                reply += f"\n{data['msg']}"
+            yield event.plain_result(reply)
+        except Exception as e:
+            logger.error(f"灯谜获取失败: {e}", exc_info=True)
+            yield event.plain_result(f"❌ 灯谜获取失败: {e}")
+
+    def _normalize_module_config(self, raw: dict) -> dict:
+        """校验并归一化模块配置，与默认配置合并。
+
+        Args:
+            raw: 来自 modules.json 或编辑器提交的原始配置。
 
         Returns:
-            Path to the generated PNG image.
+            归一化后的模块配置。
         """
-        logger.info("Generating daily report")
+        cfg = copy.deepcopy(DEFAULT_MODULE_CONFIG)
+        if not isinstance(raw, dict):
+            raw = {}
+        raw_keys = set(raw.keys())
+        for key in DEFAULT_MODULE_CONFIG:
+            if raw.get(key) is not None:
+                cfg[key] = copy.deepcopy(raw[key])
 
-        quote_mode = self.config.get("quote_mode", "hitokoto")
-        max_anime_count = self.config.get("max_anime_count", 4)
-        max_news_count = self.config.get("max_news_count", 10)
-        max_holiday_count = self.config.get("max_holiday_count", 5)
-        max_history_count = self.config.get("max_history_count", 8)
+        # 摸鱼日历展示条数限制在 1-10
+        if isinstance(cfg["moyu_items"], list):
+            cfg["moyu_items"] = [
+                it for it in cfg["moyu_items"] if isinstance(it, dict)
+            ][:10]
+        else:
+            cfg["moyu_items"] = []
 
-        date_info = get_current_date_info()
-        anime_list, hitokoto_data, moyu_list, world_news, history_events, duji_text = (
-            await self._fetch_all_data(
-                max_anime_count=max_anime_count,
-                max_news_count=max_news_count,
-                max_holiday_count=max_holiday_count,
-                max_history_count=max_history_count,
-                quote_mode=quote_mode,
-            )
+        if not isinstance(cfg.get("modules"), list):
+            cfg["modules"] = []
+
+        known_types = set(DEFAULT_MODULE_TITLES)
+        valid_modules = []
+        for raw_module in cfg["modules"]:
+            if not isinstance(raw_module, dict):
+                continue
+            m = copy.deepcopy(raw_module)
+            mtype = m.get("type")
+            if mtype == "history":
+                # 旧版配置迁移：历史上的今天已改为固定面板
+                if "history_enabled" not in raw_keys:
+                    cfg["history_enabled"] = bool(m.get("enabled", True))
+                if "history_title" not in raw_keys and m.get("title"):
+                    cfg["history_title"] = str(m["title"])
+                if "history_count" not in raw_keys and m.get("count"):
+                    cfg["history_count"] = m["count"]
+                continue
+            if mtype == "quote":
+                # 旧版配置迁移：底栏引用已改为固定面板
+                if "quote_enabled" not in raw_keys:
+                    cfg["quote_enabled"] = bool(m.get("enabled", True))
+                if "quote_sources" not in raw_keys and m.get("mode"):
+                    cfg["quote_sources"] = [m["mode"]]
+                continue
+            if mtype not in known_types:
+                logger.warning(f"忽略非法模块配置: {m}")
+                continue
+            m["enabled"] = bool(m.get("enabled", True))
+            m["title"] = str(m.get("title") or DEFAULT_MODULE_TITLES[mtype])
+            if mtype in DEFAULT_MODULE_COUNTS:
+                try:
+                    m["count"] = max(
+                        1, min(int(m.get("count", DEFAULT_MODULE_COUNTS[mtype])), 30)
+                    )
+                except (TypeError, ValueError):
+                    m["count"] = DEFAULT_MODULE_COUNTS[mtype]
+            elif mtype == "countdown":
+                if not isinstance(m.get("items"), list):
+                    m["items"] = []
+                m["items"] = [item for item in m["items"] if isinstance(item, dict)][:10]
+            # 归一化接口请求参数（仅带请求参数的模块才写入 params 字段）
+            if mtype in MODULE_PARAM_SCHEMA:
+                m["params"] = self._normalize_module_params(mtype, m.get("params"))
+            else:
+                m.pop("params", None)
+            valid_modules.append(m)
+        cfg["modules"] = valid_modules
+
+        cfg["history_enabled"] = bool(cfg["history_enabled"])
+        cfg["history_title"] = str(cfg["history_title"] or "历史上的今天")
+        try:
+            cfg["history_count"] = max(1, int(cfg.get("history_count", 4)))
+        except (TypeError, ValueError):
+            cfg["history_count"] = 4
+
+        # ---- 四个固定模块位：单选来源校验 ----
+        # 顶部模块（历史/英语/汇率）
+        if cfg.get("top_source") not in TOP_SOURCE_LABELS:
+            # 旧版配置迁移：未设置 top_source 但启用了历史面板 → 沿用历史
+            cfg["top_source"] = "history"
+        cfg["top_params"] = self._normalize_module_params(
+            cfg["top_source"], cfg.get("top_params")
         )
+        if cfg["top_source"] != "history":
+            # 选择了英语/汇率来源时，顶部展示新来源而非历史面板
+            cfg["history_enabled"] = False
+        # 中部模块1（番剧/游戏）
+        if cfg.get("mid1_source") not in MID1_SOURCE_LABELS:
+            cfg["mid1_source"] = "anime"
+        cfg["mid1_title"] = str(cfg.get("mid1_title") or MID1_SOURCE_LABELS[cfg["mid1_source"]])
+        try:
+            cfg["mid1_count"] = max(1, min(int(cfg.get("mid1_count", 4)), 12))
+        except (TypeError, ValueError):
+            cfg["mid1_count"] = 4
+        cfg["mid1_params"] = self._normalize_module_params(
+            cfg["mid1_source"], cfg.get("mid1_params")
+        )
+        # 中部模块2（新闻/资讯）
+        if cfg.get("mid2_source") not in MID2_SOURCE_LABELS:
+            cfg["mid2_source"] = "news"
+        cfg["mid2_title"] = str(cfg.get("mid2_title") or MID2_SOURCE_LABELS[cfg["mid2_source"]])
+        try:
+            cfg["mid2_count"] = max(1, min(int(cfg.get("mid2_count", 10)), 30))
+        except (TypeError, ValueError):
+            cfg["mid2_count"] = 10
+        cfg["mid2_params"] = self._normalize_module_params(
+            cfg["mid2_source"], cfg.get("mid2_params")
+        )
+        # 实时汇率参数
+        cfg["exchange_from"] = str(cfg.get("exchange_from") or "USD").strip().upper()[:3] or "USD"
+        cfg["exchange_to"] = str(cfg.get("exchange_to") or "CNY").strip().upper()[:3] or "CNY"
+        try:
+            cfg["exchange_amount"] = max(0.01, float(cfg.get("exchange_amount", 100)))
+        except (TypeError, ValueError):
+            cfg["exchange_amount"] = 100.0
+
+        cfg["quote_enabled"] = bool(cfg["quote_enabled"])
+        cfg["quote_title"] = str(cfg.get("quote_title") or "")
+        sources = cfg["quote_sources"]
+        if not isinstance(sources, list):
+            sources = []
+        sources = [s for s in sources if s in QUOTE_SOURCE_LABELS]
+        cfg["quote_sources"] = sources or ["hitokoto"]
+        return cfg
+
+    @staticmethod
+    def _normalize_module_params(mtype: str, raw) -> dict:
+        """按模块类型归一化接口请求参数，缺失字段补默认值。
+
+        Args:
+            mtype: 模块类型。
+            raw: 原始 params 字典，可为 None。
+
+        Returns:
+            归一化后的参数字典（仅含该模块 schema 中声明的字段）。
+        """
+        schema = MODULE_PARAM_SCHEMA.get(mtype) or []
+        if not isinstance(raw, dict):
+            raw = {}
+        out = {}
+        for field in schema:
+            key = field["key"]
+            val = raw.get(key)
+            if val is None or str(val).strip() == "":
+                val = field.get("default", "")
+            out[key] = str(val).strip()
+        return out
+
+    def _load_module_config(self) -> dict:
+        """读取模块配置 modules.json（每次生成都重新读取，修改后无需重载插件）。
+
+        Returns:
+            校验合并后的模块配置。
+        """
+        cfg_file = os.path.join(self.data_dir, "modules.json")
+        raw = {}
+        if os.path.exists(cfg_file):
+            try:
+                with open(cfg_file, encoding="utf-8") as f:
+                    raw = json.load(f)
+            except Exception as e:
+                logger.warning(f"读取 modules.json 失败，使用默认模块配置: {e}")
+
+        cfg = self._normalize_module_config(raw)
+
+        if not os.path.exists(cfg_file):
+            self._save_module_config(cfg)
+            logger.info(f"已生成默认模块配置文件: {cfg_file}")
+        return cfg
+
+    def _save_module_config(self, cfg: dict):
+        """保存模块配置到数据目录的 modules.json。
+
+        Args:
+            cfg: 模块配置字典。
+        """
+        try:
+            cfg_file = os.path.join(self.data_dir, "modules.json")
+            with open(cfg_file, "w", encoding="utf-8") as f:
+                json.dump(cfg, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.warning(f"保存 modules.json 失败: {e}")
+
+    def _register_web_apis(self, context: Context) -> None:
+        """注册日报编辑器 Page 所需的 Web API。"""
+        base = "/astrbot_plugin_zhenxunribao"
+        routes = [
+            (f"{base}/modules", self.api_get_modules, ["GET"], "Get daily news module config"),
+            (f"{base}/modules/save", self.api_save_modules, ["POST"], "Save daily news module config"),
+            (f"{base}/meta", self.api_get_meta, ["GET"], "Get module types and api param schema"),
+            (f"{base}/preview", self.api_preview, ["POST"], "Render daily news preview image"),
+        ]
+        for route, handler, methods, desc in routes:
+            context.register_web_api(route, handler, methods, desc)
+
+    async def api_get_modules(self):
+        """返回当前模块配置（modules.json 内容）。"""
+        return json_response(self._load_module_config())
+
+    async def api_get_meta(self):
+        """返回编辑器所需的模块元数据：类型、图标、接口参数 schema、短句来源、
+        以及四个固定模块位的候选来源（顶部/中部1/中部2/底部）。"""
+        return json_response(
+            {
+                "module_types": MODULE_TYPE_META,
+                "icons": MODULE_ICONS,
+                "param_schema": MODULE_PARAM_SCHEMA,
+                "quote_sources": QUOTE_SOURCE_LABELS,
+                "top_sources": TOP_SOURCE_LABELS,
+                "mid1_sources": MID1_SOURCE_LABELS,
+                "mid2_sources": MID2_SOURCE_LABELS,
+            }
+        )
+
+
+    async def api_save_modules(self):
+        """保存编辑器提交的模块配置。"""
+        try:
+            payload = await web_request.json(default=None)
+        except Exception:
+            payload = None
+        if not isinstance(payload, dict):
+            return json_response(
+                {"status": "error", "message": "请求体必须为 JSON 对象"}
+            )
+        cfg = self._normalize_module_config(payload)
+        self._save_module_config(cfg)
+        logger.info("已通过日报编辑器保存模块配置")
+        return json_response(cfg)
+
+
+
+    async def api_preview(self):
+        """渲染一张日报预览图，返回 base64 data URL。"""
+        image_path = None
+        try:
+            image_path = await self._generate_daily_image()
+            with open(image_path, "rb") as f:
+                image_b64 = base64.b64encode(f.read()).decode()
+            return json_response({"image": f"data:image/png;base64,{image_b64}"})
+        except Exception as e:
+            logger.error(f"生成日报预览失败: {e}", exc_info=True)
+            return json_response({"status": "error", "message": f"生成预览失败: {e}"})
+        finally:
+            if image_path and os.path.exists(image_path):
+                try:
+                    os.remove(image_path)
+                except Exception:
+                    pass
+
+    def _resolve_timer_rows(
+        self, items: list, holiday_pool: list | None = None
+    ) -> list:
+        """把计时项配置解析为展示行，供摸鱼日历和倒计时模块共用。
+
+        Args:
+            items: 计时项列表，每项为 {"type": "holiday"|"custom"|"weekly", ...}。
+            holiday_pool: 节假日数据（按顺序供 holiday 类型计时项消费），无则为 None。
+
+        Returns:
+            展示行列表，每项为 {"name": ..., "days": ..., "countup": bool}：
+            countup=False 表示倒计时（还剩 N 天），True 表示正计时（过了 N 天）。
+        """
+        rows = []
+        next_holiday = 0
+        for item in items:
+            # countdown 模块的条目允许省略 type，带 date 即视为自定义倒计时
+            itype = item.get("type") or ("custom" if item.get("date") else None)
+            row = None
+            if itype == "holiday":
+                if holiday_pool and next_holiday < len(holiday_pool):
+                    holiday = holiday_pool[next_holiday]
+                    next_holiday += 1
+                    row = {
+                        "name": holiday.get("name") or "节假日",
+                        "days": str(abs(int(holiday.get("days_left", 0)))),
+                        "countup": False,
+                    }
+            elif itype == "custom":
+                days = days_until_date(item.get("date", ""))
+                if days is not None:
+                    row = {
+                        "name": item.get("name") or "自定义计时",
+                        "days": str(abs(days)),
+                        "countup": days < 0,
+                    }
+            elif itype == "weekly":
+                row = {
+                    "name": item.get("name") or "周休日",
+                    "days": str(days_until_weekday(item.get("weekday", 6))),
+                    "countup": False,
+                }
+            else:
+                logger.warning(f"忽略无法解析的计时项: {item}")
+                continue
+            if row:
+                rows.append(row)
+        return rows
+
+    async def _fetch_quote_text(self, source: str) -> dict | None:
+        """获取底栏短句内容，免费接口失败时走 ALAPI 兜底。
+
+        Args:
+            source: 短句来源，见 QUOTE_SOURCE_LABELS。
+
+        Returns:
+            {"title": ..., "text": ..., "from": ...}，来源不可用返回 None。
+        """
+        title = QUOTE_SOURCE_LABELS.get(source, "今日一言")
+        text, from_ = None, ""
+
+        if source == "hitokoto":
+            try:
+                data = await self.hitokoto_api.get_hitokoto_async()
+            except Exception:
+                data = None
+            if isinstance(data, dict) and data.get("hitokoto"):
+                text = str(data["hitokoto"]).strip()
+                from_ = str(data.get("from", "") or "").strip()
+                if not from_ or from_ == "网络":
+                    from_ = "佚名"
+        elif source == "duji":
+            text = await self.duji_api.get_today_duji_async()
+            text = text.strip() if text else ""
+        elif source == "sjyy":
+            # 糖豆子随机一言（纯文本接口）
+            text = await self.tangdouz_api.get_random_quote()
+            text = text.strip() if text else ""
+        elif source == "riddle":
+            # 随机谜语：日报只展示谜面，答案不展示
+            data = await self.tangdouz_api.get_riddle()
+            if data:
+                text = data.get("mimian") or ""
+                from_ = data.get("type") or ""
+        elif source == "xiehouyu":
+            # 歇后语无免费通道，直接走 ALAPI
+            text, from_ = await self.alapi.get_quote_text("xiehouyu")
+        else:
+            # mingyan / tiangou / gaoxiao：aa1.cn 免费接口为主
+            text = await self.aa1_api.get_text_async(source)
+            if not text and source == "mingyan":
+                # 名人名言 ALAPI 兜底
+                text, from_ = await self.alapi.get_quote_text("mingyan")
+
+        if not text:
+            return None
+        return {
+            "title": title,
+            "text": text,
+            "from": from_,
+            # 谜语来源用专用谜面样式渲染（不套引号），其余短句走引用样式
+            "is_riddle": source == "riddle",
+        }
+
+    async def _generate_daily_image(self) -> str:
+        logger.info("开始生成日报")
+
+        module_cfg = self._load_module_config()
+        date_info = get_current_date_info()
+        (
+            moyu_rows,
+            history_events,
+            module_views,
+            quote_data,
+            exchange_data,
+        ) = await self._fetch_all_data(module_cfg)
+
+        # 顶部模块视图：根据 top_source 组装（english/exchange 复用 module_views 渲染）
+        top_view = None
+        top_source = module_cfg.get("top_source")
+        if top_source == "history":
+            top_view = (
+                {
+                    "type": "history",
+                    "title": module_cfg["history_title"],
+                    "events": history_events,
+                }
+                if history_events
+                else None
+            )
+        elif top_source == "english":
+            for v in module_views:
+                if v["type"] == "english":
+                    top_view = v
+                    break
+        elif top_source == "exchange" and exchange_data:
+            top_view = {
+                "type": "exchange",
+                "title": "实时汇率",
+                "data": exchange_data,
+            }
 
         template_data = {
             "date_info": date_info,
-            "anime_list": anime_list or [],
-            "hitokoto_data": hitokoto_data or {"hitokoto": "暂无", "from": "佚名"},
-            "moyu_list": moyu_list or [],
-            "world_news": world_news or [],
-            "history_events": history_events or [],
-            "duji_text": duji_text or "今天也要加油哦！",
-            "quote_mode": quote_mode,
+            "moyu_rows": moyu_rows,
+            "moyu_title": module_cfg.get("moyu_title") or "摸鱼日历",
+            "top_view": top_view,
+            "top_source": top_source,
+            "history_title": module_cfg.get("history_title") or "历史上的今天",
+            "other_modules": [
+                view for view in module_views if view.get("slot") != "top"
+            ],
+            "quote": quote_data,
+            "icons": MODULE_ICONS,
         }
 
         logger.info(
-            f"Template data ready: anime={len(template_data['anime_list'])}, "
-            f"holidays={len(template_data['moyu_list'])}, "
-            f"news={len(template_data['world_news'])}, "
-            f"history={len(template_data['history_events'])}"
+            f"模块数据准备完成: 摸鱼计时={len(moyu_rows)}条, "
+            f"顶部={top_source}:{top_view is not None}, "
+            f"模块={[v['type'] for v in module_views]}, 底栏引用={'有' if quote_data else '无'}"
         )
 
-        html_template_str = self.template_path.read_text(encoding="utf-8")
+        try:
+            with open(self.template_path, encoding="utf-8") as f:
+                html_template_str = f.read()
+        except Exception as e:
+            logger.error(f"读取模板文件失败: {e}", exc_info=True)
+            raise
+
         template = Template(html_template_str)
         rendered_html = template.render(**template_data)
         rendered_html = await self._embed_resources(rendered_html)
@@ -164,115 +1037,370 @@ html, body {
 }
 """
         rendered_html = rendered_html.replace("</style>", style_fix + "</style>", 1)
-
         image_path = await self._render_html_with_playwright(rendered_html)
-        logger.info("Daily report generated")
+        logger.info("日报生成成功")
         return image_path
 
-    async def _fetch_all_data(
-        self,
-        max_anime_count: int,
-        max_news_count: int,
-        max_holiday_count: int,
-        max_history_count: int,
-        quote_mode: str,
-    ):
-        """Fetch all data sources concurrently.
-
-        Only the quote source matching ``quote_mode`` is requested to avoid
-        wasted API calls.
+    async def _fetch_all_data(self, module_cfg: dict):
+        """按模块配置并发抓取数据并组装为模板视图。
 
         Args:
-            max_anime_count: Max anime entries to fetch.
-            max_news_count: Max news entries to fetch.
-            max_holiday_count: Max holiday entries to fetch.
-            max_history_count: Max history events to fetch.
-            quote_mode: "hitokoto" or "duji".
+            module_cfg: _load_module_config 返回的模块配置。
 
         Returns:
-            Tuple of (anime_list, hitokoto_data, moyu_list, world_news,
-            history_events, duji_text). Failed sources degrade to empty/neutral
-            placeholders instead of fabricated sample data.
+            (moyu_rows, history_events, module_views, quote_data, exchange_data)：
+            摸鱼日历展示行、历史事件列表、模块视图、底部引用和汇率数据。
+            顶部来源通过 slot 标记，避免重复进入自由模块视图。
         """
-        fetch_quote = (
-            self.duji_api.get_today_duji_async()
-            if quote_mode == "duji"
-            else self.hitokoto_api.get_hitokoto_async()
+        modules = [m for m in module_cfg["modules"] if m["enabled"]]
+
+        # 摸鱼日历：仅当存在节假日计时项时才请求节假日数据
+        holiday_count = sum(
+            1 for it in module_cfg["moyu_items"] if it.get("type") == "holiday"
         )
+        holiday_pool = []
+        if holiday_count:
+            try:
+                holiday_pool = await self.holiday_api.get_moyu_list_async(
+                    max_count=holiday_count
+                )
+            except Exception as e:
+                logger.warning(f"节假日数据获取失败: {e}")
+
+        # 固定面板与可排序模块统一并发抓取：(类型, 对应模块配置或 None, 协程)
+        tasks = []
+        if module_cfg["top_source"] == "history" and module_cfg["history_enabled"]:
+            tasks.append(
+                (
+                    "history",
+                    None,
+                    self.history_api.get_today_history_async(
+                        max_count=module_cfg["history_count"]
+                    ),
+                )
+            )
+        elif module_cfg["top_source"] == "english":
+            tasks.append(
+                (
+                    "english",
+                    {"title": "每日英语", "count": module_cfg.get("top_english_count", 1), "slot": "top"},
+                    self.english_api.get_words_async(
+                        max_count=module_cfg.get("top_english_count", 1)
+                    ),
+                )
+            )
+        elif module_cfg["top_source"] == "exchange":
+            tasks.append(
+                (
+                    "exchange",
+                    None,
+                    self.tangdouz_api.get_exchange_rate(
+                        from_currency=module_cfg["exchange_from"],
+                        to_currency=module_cfg["exchange_to"],
+                        amount=module_cfg["exchange_amount"],
+                    ),
+                )
+            )
+        if module_cfg["quote_enabled"]:
+            source = random.choice(module_cfg["quote_sources"])
+            tasks.append(("quote", None, self._fetch_quote_text(source)))
+
+        # ---- 中部模块1：番剧/游戏类（单选） ----
+        # 旧版 modules 列表里若已有同类型模块，会被下方 free modules 分支重复抓取；
+        # 为避免重复，先记录中部固定模块位占用的类型，后续 free modules 跳过它们。
+        mid1_source = module_cfg.get("mid1_source")
+        mid2_source = module_cfg.get("mid2_source")
+        fixed_kinds = {k for k in (mid1_source, mid2_source) if k}
+
+        if mid1_source == "anime":
+            mid1_module = {
+                "type": "anime",
+                "title": module_cfg["mid1_title"],
+                "count": module_cfg["mid1_count"],
+                "params": module_cfg["mid1_params"],
+            }
+            tasks.append(
+                (
+                    "anime",
+                    mid1_module,
+                    self.bgm_api.get_today_anime_async(max_count=module_cfg["mid1_count"]),
+                )
+            )
+        if mid1_source == "cartoon":
+            mid1_module = {
+                "type": "cartoon",
+                "title": module_cfg["mid1_title"],
+                "count": module_cfg["mid1_count"],
+                "params": module_cfg["mid1_params"],
+            }
+            tasks.append(
+                (
+                    "cartoon",
+                    mid1_module,
+                    self.xiaoapi_api.get_cartoon_updates(
+                        date_str=module_cfg["mid1_params"].get("date", "")
+                    ),
+                )
+            )
+        elif mid1_source == "hbox":
+            mid1_module = {
+                "type": "hbox",
+                "title": module_cfg["mid1_title"],
+                "count": module_cfg["mid1_count"],
+                "params": module_cfg["mid1_params"],
+            }
+            tasks.append(
+                (
+                    "hbox",
+                    mid1_module,
+                    self.tangdouz_api.get_hot_games(max_count=module_cfg["mid1_count"]),
+                )
+            )
+
+        # ---- 中部模块2：新闻/资讯类（单选） ----
+        if mid2_source == "news":
+            tasks.append(
+                (
+                    "news",
+                    {"title": module_cfg["mid2_title"], "count": module_cfg["mid2_count"]},
+                    self.zaobao_api.get_world_news_async(max_count=module_cfg["mid2_count"]),
+                )
+            )
+        elif mid2_source == "aidaily":
+            mid2_module = {
+                "type": "aidaily",
+                "title": module_cfg["mid2_title"],
+                "count": module_cfg["mid2_count"],
+                "params": module_cfg["mid2_params"],
+            }
+            tasks.append(
+                (
+                    "aidaily",
+                    mid2_module,
+                    self.milora_api.get_aidaily(
+                        max_count=module_cfg["mid2_count"],
+                        rtype=module_cfg["mid2_params"].get("type", ""),
+                        date=module_cfg["mid2_params"].get("date", ""),
+                    ),
+                )
+            )
+        elif mid2_source == "rmrbpdf":
+            mid2_module = {
+                "type": "rmrbpdf",
+                "title": module_cfg["mid2_title"],
+                "count": 0,
+                "params": module_cfg["mid2_params"],
+            }
+            tasks.append(
+                (
+                    "rmrbpdf",
+                    mid2_module,
+                    self.milora_api.get_rmrbpdf(
+                        date=module_cfg["mid2_params"].get("date", "")
+                    ),
+                )
+            )
+
+        # free modules（旧版可排序模块列表）——跳过已被中部固定模块位占用的类型
+        modules = [
+            m
+            for m in modules
+            if m["type"] not in fixed_kinds
+            and not (module_cfg.get("top_source") == m["type"])
+        ]
+        for m in modules:
+            mtype = m["type"]
+            if mtype == "anime":
+                tasks.append(
+                    (
+                        "anime",
+                        m,
+                        self.bgm_api.get_today_anime_async(max_count=m["count"]),
+                    )
+                )
+            elif mtype == "news":
+                tasks.append(
+                    (
+                        "news",
+                        m,
+                        self.zaobao_api.get_world_news_async(max_count=m["count"]),
+                    )
+                )
+            elif mtype == "english":
+                tasks.append(
+                    (
+                        "english",
+                        m,
+                        self.english_api.get_words_async(max_count=m["count"]),
+                    )
+                )
+            elif mtype == "essay":
+                tasks.append(
+                    (
+                        "essay",
+                        m,
+                        self.alapi.get_daily_essay(),
+                    )
+                )
+            elif mtype == "aidaily":
+                params = m.get("params") or {}
+                tasks.append(
+                    (
+                        "aidaily",
+                        m,
+                        self.milora_api.get_aidaily(
+                            max_count=m.get("count", 10),
+                            rtype=params.get("type", ""),
+                            date=params.get("date", ""),
+                        ),
+                    )
+                )
+            elif mtype == "rmrbpdf":
+                params = m.get("params") or {}
+                tasks.append(
+                    (
+                        "rmrbpdf",
+                        m,
+                        self.milora_api.get_rmrbpdf(date=params.get("date", "")),
+                    )
+                )
+            elif mtype == "cartoon":
+                params = m.get("params") or {}
+                tasks.append(
+                    (
+                        "cartoon",
+                        m,
+                        self.xiaoapi_api.get_cartoon_updates(
+                            date_str=params.get("date", "")
+                        ),
+                    )
+                )
+            elif mtype == "shici":
+                params = m.get("params") or {}
+                tasks.append(
+                    (
+                        "shici",
+                        m,
+                        self.xiaoapi_api.get_shici(
+                            params.get("keyword", "") or "静夜思"
+                        ),
+                    )
+                )
+            elif mtype == "yulu":
+                params = m.get("params") or {}
+                tasks.append(
+                    (
+                        "yulu",
+                        m,
+                        self.xiaoapi_api.get_yulu(params.get("type", "")),
+                    )
+                )
+            else:
+                # countdown 等纯配置模块无需网络请求
+                tasks.append((mtype, m, asyncio.sleep(0, result=None)))
+
         results = await asyncio.gather(
-            self.bgm_api.get_today_anime_async(max_count=max_anime_count),
-            self.holiday_api.get_moyu_list_async(max_count=max_holiday_count),
-            self.zaobao_api.get_world_news_async(max_count=max_news_count),
-            self.history_api.get_today_history_async(max_count=max_history_count),
-            fetch_quote,
-            return_exceptions=True,
+            *(coro for _, _, coro in tasks), return_exceptions=True
         )
 
-        anime_list = results[0] if not isinstance(results[0], Exception) else []
-        moyu_list = results[1] if not isinstance(results[1], Exception) else []
-        world_news = results[2] if not isinstance(results[2], Exception) else []
-        history_events = results[3] if not isinstance(results[3], Exception) else []
+        history_events: list = []
+        quote_data = None
+        module_views = []
+        exchange_data = None
+        for (kind, m, _), res in zip(tasks, results):
+            if isinstance(res, Exception):
+                logger.warning(f"{kind} 数据获取失败: {res}")
+                res = None
+            if kind == "history":
+                history_events = res or []
+            elif kind == "exchange":
+                exchange_data = res
+            elif kind == "quote":
+                quote_data = res
+            elif kind in ("anime", "cartoon", "hbox", "news", "aidaily", "rmrbpdf") and kind in (
+                module_cfg.get("mid1_source"),
+                module_cfg.get("mid2_source"),
+            ):
+                # 中部固定模块位的数据直接当作 module_views（标题来自配置）
+                data = res
+                if kind == "hbox":
+                    data = (res or {}).get("games") if isinstance(res, dict) else None
+                elif kind == "cartoon" and isinstance(data, dict):
+                    data["items"] = (data.get("items") or [])[: max(1, int(m.get("count", 6)))]
+                elif kind == "rmrbpdf":
+                    data = res
+                if data:
+                    module_views.append(
+                        {
+                            "type": kind,
+                            "title": (
+                                module_cfg["mid1_title"]
+                                if kind == module_cfg.get("mid1_source")
+                                else module_cfg["mid2_title"]
+                            ),
+                            "data": data,
+                        }
+                    )
+                else:
+                    logger.warning(f"中部模块 {kind} 无数据，本次跳过")
+            else:
+                data = res if res is not None else []
+                if kind == "countdown":
+                    data = self._resolve_timer_rows(m.get("items") or [])
+                elif kind == "cartoon" and isinstance(data, dict):
+                    data["items"] = (data.get("items") or [])[: max(1, int(m.get("count", 6)))]
+                elif kind in ("essay", "shici", "yulu") and isinstance(data, dict):
+                    data = [data]
+                if data:
+                    module_views.append(
+                        {
+                            "type": kind,
+                            "title": m["title"],
+                            "data": data,
+                            **({"slot": m["slot"]} if m.get("slot") else {}),
+                        }
+                    )
+                else:
+                    logger.warning(f"模块 {kind}({m['title']}) 无数据，本次跳过")
 
-        hitokoto_data = {"hitokoto": "暂无", "from": "佚名"}
-        duji_text = "今天也要加油哦！"
-        if quote_mode == "duji":
-            if not isinstance(results[4], Exception) and results[4]:
-                duji_text = results[4]
-        else:
-            if not isinstance(results[4], Exception) and results[4]:
-                hitokoto_data = results[4]
-                from_value = str(hitokoto_data.get("from", "") or "").strip()
-                if not from_value or from_value == "网络":
-                    from_value = "佚名"
-                hitokoto_data["from"] = from_value
-
-        for i, result in enumerate(results):
-            if isinstance(result, Exception):
-                logger.warning(f"Failed to fetch data source (index {i}): {result}")
-
-        logger.debug(
-            f"Fetched raw data: anime={anime_list}, holidays={moyu_list}, "
-            f"news={world_news}, history={history_events}"
+        moyu_rows = self._resolve_timer_rows(
+            module_cfg["moyu_items"], holiday_pool=holiday_pool
         )
+        return moyu_rows, history_events, module_views, quote_data, exchange_data
 
-        return anime_list, hitokoto_data, moyu_list, world_news, history_events, duji_text
-
-    def _file_to_base64(self, file_path: Path) -> str | None:
-        """Encode a local resource file as a data URI for HTML embedding.
-
-        Args:
-            file_path: Path to the font/image file.
-
-        Returns:
-            Data URI string, or None when the file is missing or unreadable.
-        """
+    def _file_to_base64(self, file_path: str) -> str | None:
         try:
-            if not file_path.exists():
-                logger.warning(f"Resource file not found: {file_path}")
+            if not os.path.exists(file_path):
+                logger.warning(f"资源文件不存在: {file_path}")
                 return None
 
-            base64_data = base64.b64encode(file_path.read_bytes()).decode("utf-8")
-            mime_types = {
-                ".otf": "font/opentype",
-                ".ttf": "font/ttf",
-                ".woff": "font/woff",
-                ".woff2": "font/woff2",
-                ".png": "image/png",
-                ".jpg": "image/jpeg",
-                ".jpeg": "image/jpeg",
-                ".gif": "image/gif",
-                ".svg": "image/svg+xml",
-            }
-            mime_type = mime_types.get(file_path.suffix.lower(), "application/octet-stream")
-            return f"data:{mime_type};base64,{base64_data}"
+            with open(file_path, "rb") as f:
+                file_data = f.read()
+                base64_data = base64.b64encode(file_data).decode("utf-8")
+
+                ext = os.path.splitext(file_path)[1].lower()
+                mime_types = {
+                    ".otf": "font/opentype",
+                    ".ttf": "font/ttf",
+                    ".woff": "font/woff",
+                    ".woff2": "font/woff2",
+                    ".png": "image/png",
+                    ".jpg": "image/jpeg",
+                    ".jpeg": "image/jpeg",
+                    ".gif": "image/gif",
+                    ".svg": "image/svg+xml",
+                }
+                mime_type = mime_types.get(ext, "application/octet-stream")
+
+                return f"data:{mime_type};base64,{base64_data}"
         except Exception as e:
-            logger.warning(f"Failed to encode file to base64 {file_path}: {e}")
+            logger.warning(f"转换文件到base64失败 {file_path}: {e}")
             return None
 
     async def _embed_resources(self, html_template: str) -> str:
-        """Inline local fonts and images referenced by the template as data URIs."""
         def replace_font(match):
-            file_path = self.plugin_dir / "res" / "font" / match.group(1)
+            filename = match.group(1)
+            file_path = os.path.join(self.plugin_dir, "res", "font", filename)
             base64_uri = self._file_to_base64(file_path)
             if base64_uri:
                 return f'url("{base64_uri}")'
@@ -288,12 +1416,13 @@ html, body {
         def replace_image(match):
             filepath = match.group(1)
             if filepath.startswith("icon/") or filepath.startswith("image/"):
-                file_path = self.plugin_dir / "res" / filepath
+                file_path = os.path.join(self.plugin_dir, "res", filepath)
                 base64_uri = self._file_to_base64(file_path)
                 if base64_uri:
-                    logger.debug(f"Embedded image as base64: {filepath}")
+                    logger.debug(f"转换图片为base64: {filepath}")
                     return f'src="{base64_uri}"'
-                logger.warning(f"Failed to embed image: {filepath}")
+                else:
+                    logger.warning(f"图片转换为base64失败: {filepath}")
             return match.group(0)
 
         html_template = re.sub(
@@ -310,83 +1439,90 @@ html, body {
     ) -> str:
         """Render HTML to PNG using Playwright.
 
-        Clarity is controlled by the BrowserContext device_scale_factor (DPR).
-
-        Args:
-            html_content: Rendered HTML string.
-            output_path: Optional output PNG path; defaults to a temp file.
-
-        Returns:
-            Path to the generated PNG image.
+        提升清晰度的关键：使用 BrowserContext 的 device_scale_factor (DPR)。
         """
         temp_html_path = None
         context = None
         try:
-            temp_html_path = Path(gettempdir()) / f"zhenxun_daily_{uuid.uuid4().hex}.html"
-            temp_html_path.write_text(html_content, encoding="utf-8")
+            temp_dir = tempfile.gettempdir()
+            temp_html_path = os.path.join(
+                temp_dir,
+                f"zhenxun_daily_{uuid.uuid4().hex}.html",
+            )
+            with open(temp_html_path, "w", encoding="utf-8") as f:
+                f.write(html_content)
 
             if output_path is None:
-                output_path = str(temp_html_path.with_suffix(".png"))
+                output_path = temp_html_path.replace(".html", ".png")
 
-            # Higher DPR means sharper output but slower render and larger file
-            dpr = int(self.config.get("render_dpr", 5))
+            # DPR (device scale factor): 越大越清晰，但图片更大、渲染更慢
+            dpr = int(self.config.get("render_dpr", 4))
             dpr = max(1, min(dpr, 6))
 
             async with async_playwright() as p:
-                logger.info("Launching Playwright browser...")
+                logger.info("启动Playwright浏览器...")
                 browser = await p.chromium.launch(headless=True)
                 try:
+                    # 用 context 设置 DPR 提升截图清晰度
                     context = await browser.new_context(
                         viewport={"width": 1156, "height": 1000},
                         device_scale_factor=dpr,
                     )
                     page = await context.new_page()
 
-                    file_url = f"file://{pathname2url(str(temp_html_path))}"
+                    file_url = f"file://{pathname2url(temp_html_path)}"
                     await page.goto(file_url, wait_until="networkidle")
                     await page.wait_for_timeout(2000)
 
                     wrapper = await page.query_selector(".wrapper")
                     if not wrapper:
-                        raise Exception("Element .wrapper not found")
+                        raise Exception("未找到.wrapper元素")
 
                     box = await wrapper.bounding_box()
                     if not box:
-                        raise Exception("Cannot get bounding box of .wrapper")
+                        raise Exception("无法获取.wrapper元素的bounding box")
 
-                    # Resize viewport to fit the full content height
-                    viewport_height = max(int(box["height"] * 1.2), 1000)
+                    wrapper_width = int(box["width"])
+                    wrapper_height = int(box["height"])
+
+                    # 动态设置 viewport，避免超长内容截图不完整（留余量）
+                    viewport_height = max(int(wrapper_height * 1.2), 1000)
                     viewport_width = 1156
                     await page.set_viewport_size(
                         {"width": viewport_width, "height": viewport_height}
                     )
 
-                    # Re-query after reflow
-                    await page.wait_for_timeout(300)
+                    # viewport 调整后重新查询元素和 bounding box
+                    await page.wait_for_timeout(300)  # 等待 reflow 完成
                     wrapper = await page.query_selector(".wrapper")
                     if not wrapper:
-                        raise Exception("Element .wrapper not found after viewport resize")
+                        raise Exception("未找到.wrapper元素(viewport调整后)")
 
                     box = await wrapper.bounding_box()
                     if not box:
                         raise Exception(
-                            "Cannot get bounding box of .wrapper after viewport resize"
+                            "无法获取.wrapper元素的bounding box(viewport调整后)"
                         )
 
                     logger.info(
-                        f"Wrapper size: {int(box['width'])}x{int(box['height'])}, "
+                        f"Wrapper宽高: {int(box['width'])}x{int(box['height'])}, "
                         f"viewport: {viewport_width}x{viewport_height}, DPR={dpr}"
                     )
 
+                    # 使用 clip 精确裁剪，避免 body absolute 定位导致的大片空白
                     clip = {
                         "x": int(box["x"]),
                         "y": int(box["y"]),
                         "width": int(box["width"]),
                         "height": int(box["height"]),
                     }
-                    await page.screenshot(path=output_path, type="png", clip=clip)
+                    await page.screenshot(
+                        path=output_path,
+                        type="png",
+                        clip=clip,
+                    )
 
-                    logger.info(f"Screenshot saved: {output_path}")
+                    logger.info(f"截图完成: {output_path}")
                     return output_path
                 finally:
                     try:
@@ -396,20 +1532,20 @@ html, body {
                         await browser.close()
 
         except Exception as e:
-            logger.error(f"Playwright rendering failed: {e}", exc_info=True)
+            logger.error(f"Playwright渲染失败: {e}", exc_info=True)
             raise
         finally:
-            if temp_html_path and temp_html_path.exists():
+            if temp_html_path and os.path.exists(temp_html_path):
                 try:
-                    temp_html_path.unlink()
+                    os.remove(temp_html_path)
                 except Exception as e:
-                    logger.warning(f"Failed to delete temp HTML file: {e}")
+                    logger.warning(f"删除临时HTML文件失败: {e}")
 
     async def _scheduled_push_task(self):
-        """Periodic scheduler for the daily push.
+        """定时推送调度器。
 
-        Re-reads the config every cycle so config changes take effect within a
-        minute, and guards against duplicate pushes with a last-push-date mark.
+        每个周期重新读取配置，使配置变更能较快生效；使用当日推送标记
+        避免同一天重复推送。
         """
         last_push_date = None
         while True:
@@ -421,19 +1557,17 @@ html, body {
 
                 push_groups = self.config.get("scheduled_push_groups", [])
                 if not push_groups:
-                    logger.debug("Scheduled push enabled but no target groups configured")
+                    logger.debug("定时推送已启用，但未配置目标群组")
                     await asyncio.sleep(60)
                     continue
 
+                push_time_str = self.config.get("scheduled_push_time", "08:00")
                 try:
-                    hour, minute = map(
-                        int, str(self.config.get("scheduled_push_time", "08:00")).split(":")
-                    )
+                    hour, minute = map(int, str(push_time_str).split(":"))
                     push_time = time(hour, minute)
                 except (ValueError, AttributeError):
                     logger.error(
-                        f"Invalid scheduled_push_time: "
-                        f"{self.config.get('scheduled_push_time')}, falling back to 08:00"
+                        f"定时推送时间格式错误: {push_time_str}，使用默认时间08:00"
                     )
                     push_time = time(8, 0)
 
@@ -441,33 +1575,32 @@ html, body {
                 due = now >= datetime.combine(now.date(), push_time)
                 if due and last_push_date != now.date():
                     last_push_date = now.date()
-                    logger.info("Scheduled push triggered")
+                    logger.info("开始执行定时推送")
                     await self._push_daily_to_groups(push_groups)
 
                 await asyncio.sleep(30)
             except asyncio.CancelledError:
-                logger.info("Scheduled push task cancelled")
+                logger.info("定时推送任务已取消")
                 break
             except Exception as e:
-                logger.error(f"Scheduled push task error: {e}", exc_info=True)
+                logger.error(f"定时推送任务出错: {e}", exc_info=True)
                 await asyncio.sleep(60)
 
     async def _push_daily_to_groups(self, group_list: list):
-        """Push the daily report to configured sessions.
+        """向配置的目标会话推送日报。
 
-        All pushes go through ``context.send_message`` so every platform
-        adapter is supported; entries may be unified_msg_origin strings or
-        plain group ids previously learned from /日报 usage.
+        统一通过 context.send_message 发送，兼容所有平台适配器；目标可以
+        是 unified_msg_origin，也可以是 /日报 使用中学习到的纯群号。
 
         Args:
-            group_list: Push targets (unified_msg_origin or plain group id).
+            group_list: 推送目标列表（unified_msg_origin 或纯群号）。
         """
         image_path = None
         try:
-            logger.info(f"Generating daily report for push, targets: {len(group_list)}")
+            logger.info(f"开始生成日报图片，目标数量: {len(group_list)}")
             image_path = await self._generate_daily_image()
-            if not image_path or not Path(image_path).exists():
-                logger.error(f"Daily report image missing: {image_path}")
+            if not image_path or not os.path.exists(image_path):
+                logger.error(f"日报图片生成失败或文件不存在: {image_path}")
                 return
 
             greeting = await self._generate_greeting_text()
@@ -477,45 +1610,44 @@ html, body {
                 umo = self._resolve_umo(entry)
                 if not umo:
                     logger.warning(
-                        f"Cannot resolve unified_msg_origin for push target '{entry}'. "
-                        f"Send /日报 once in the target group so the plugin can learn it, "
-                        f"or configure the full unified_msg_origin (see /日报群组ID)."
+                        f"无法解析推送目标 '{entry}' 的 unified_msg_origin。"
+                        f"请先在目标群发送 /日报 让插件学习，或直接配置完整 "
+                        f"unified_msg_origin（见 /日报群组ID）。"
                     )
                     continue
                 try:
-                    chain = MessageChain()
+                    message_chain = MessageChain()
                     if greeting:
-                        chain.message(greeting)
-                    chain.file_image(image_path)
-                    sent = await self.context.send_message(umo, chain)
+                        message_chain.message(greeting)
+                    message_chain.file_image(image_path)
+                    sent = await self.context.send_message(umo, message_chain)
                     if sent:
                         success_count += 1
-                        logger.info(f"Daily report pushed to session: {umo}")
+                        logger.info(f"成功推送日报到会话: {umo}")
                     else:
-                        logger.warning(f"No matching platform for session: {umo}")
+                        logger.warning(f"没有匹配的平台可以发送到会话: {umo}")
                 except Exception as e:
-                    logger.error(f"Failed to push to session {umo}: {e}", exc_info=True)
+                    logger.error(f"推送到会话 {umo} 时出错: {e}", exc_info=True)
 
-            logger.info(f"Scheduled push finished, success: {success_count}/{len(group_list)}")
+            logger.info(f"定时推送完成，成功: {success_count}/{len(group_list)}")
         except Exception as e:
-            logger.error(f"Scheduled push failed: {e}", exc_info=True)
+            logger.error(f"定时推送日报失败: {e}", exc_info=True)
         finally:
-            if image_path and Path(image_path).exists():
+            if image_path and os.path.exists(image_path):
                 try:
-                    Path(image_path).unlink()
-                    logger.debug(f"Cleaned up temp image: {image_path}")
+                    os.remove(image_path)
+                    logger.debug(f"已清理临时图片文件: {image_path}")
                 except Exception as e:
-                    logger.warning(f"Failed to clean up temp image: {e}")
+                    logger.warning(f"清理临时图片文件失败: {e}")
 
     def _resolve_umo(self, entry: str) -> str | None:
-        """Resolve a configured push target to a unified_msg_origin.
+        """把配置的推送目标解析为 unified_msg_origin。
 
         Args:
-            entry: unified_msg_origin string, or a plain group id that was
-                previously learned from /日报 usage.
+            entry: unified_msg_origin 字符串，或此前从 /日报 学习到的纯群号。
 
         Returns:
-            The unified_msg_origin, or None when it cannot be resolved.
+            解析出的 unified_msg_origin；无法解析时返回 None。
         """
         entry = str(entry).strip()
         if ":" in entry:
@@ -523,87 +1655,96 @@ html, body {
         return self.group_umo_mapping.get(self._extract_group_id(entry))
 
     def _load_group_mapping(self):
-        """Load the group id -> unified_msg_origin mapping from the data dir."""
+        """从文件加载群号到 unified_msg_origin 的映射"""
         try:
-            mapping_file = StarTools.get_data_dir("astrbot_plugin_zhenxunribao") / "group_mapping.json"
-            if mapping_file.exists():
-                self.group_umo_mapping = json.loads(mapping_file.read_text(encoding="utf-8"))
-                logger.info(f"Loaded {len(self.group_umo_mapping)} group mappings")
+            import json
+
+            # 使用标准数据目录，避免写入插件源码目录
+            data_dir = StarTools.get_data_dir("astrbot_plugin_zhenxunribao")
+            mapping_file = os.path.join(data_dir, "group_mapping.json")
+            if os.path.exists(mapping_file):
+                with open(mapping_file, encoding="utf-8") as f:
+                    self.group_umo_mapping = json.load(f)
+                logger.info(f"已加载 {len(self.group_umo_mapping)} 个群组映射")
         except Exception as e:
-            logger.warning(f"Failed to load group mappings: {e}")
+            logger.warning(f"加载群组映射失败: {e}")
             self.group_umo_mapping = {}
 
     def _save_group_mapping(self):
-        """Persist the group id -> unified_msg_origin mapping to the data dir."""
+        """保存群号到 unified_msg_origin 的映射到文件"""
         try:
-            mapping_file = StarTools.get_data_dir("astrbot_plugin_zhenxunribao") / "group_mapping.json"
-            mapping_file.write_text(
-                json.dumps(self.group_umo_mapping, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
-            logger.debug(f"Saved {len(self.group_umo_mapping)} group mappings")
+            import json
+
+            # 使用标准数据目录，避免写入插件源码目录
+            data_dir = StarTools.get_data_dir("astrbot_plugin_zhenxunribao")
+            mapping_file = os.path.join(data_dir, "group_mapping.json")
+            with open(mapping_file, "w", encoding="utf-8") as f:
+                json.dump(self.group_umo_mapping, f, ensure_ascii=False, indent=2)
+            logger.debug(f"已保存 {len(self.group_umo_mapping)} 个群组映射")
         except Exception as e:
-            logger.warning(f"Failed to save group mappings: {e}")
+            logger.warning(f"保存群组映射失败: {e}")
 
     def _extract_group_id(self, group_id_str: str) -> str:
-        """Extract the plain group id from various identifier formats.
-
-        Args:
-            group_id_str: A pure group id or a unified_msg_origin such as
-                ``aiocqhttp:GroupMessage:123456789``.
-
-        Returns:
-            The extracted plain group id.
-        """
+        """从配置中提取纯群号，支持多种格式"""
         group_id_str = str(group_id_str).strip()
 
+        # 如果是纯数字，直接返回
         if group_id_str.isdigit():
             return group_id_str
 
-        if ':' in group_id_str:
-            parts = group_id_str.split(':')
+        # 尝试从 unified_msg_origin 格式中提取群号
+        # 格式如: aiocqhttp:GroupMessage:123456789 或 default:GroupMessage:xxx_123456789
+        if ":" in group_id_str:
+            parts = group_id_str.split(":")
             if len(parts) >= 3:
                 last_part = parts[-1]
-                # Handle possible botid_groupid formats
-                if '_' in last_part:
-                    return last_part.split('_')[-1]
+                # 处理可能的 botid_groupid 格式
+                if "_" in last_part:
+                    return last_part.split("_")[-1]
                 return last_part
 
         return group_id_str
 
     async def _generate_greeting_text(self) -> str:
-        """Generate the push greeting, via LLM when enabled.
-
-        Returns:
-            A short greeting text line (possibly empty on failure).
-        """
+        """使用 AI 生成个性化的推送文本"""
         try:
+            # 获取当前时间和节日信息
+            from datetime import datetime
+
             now = datetime.now()
             hour = now.hour
             date_info = get_current_date_info()
 
+            # 获取节假日信息
             moyu_list = []
             try:
                 holiday_data = await self.holiday_api.get_moyu_list_async(max_count=1)
-                if holiday_data:
+                if holiday_data and len(holiday_data) > 0:
                     moyu_list = holiday_data
-            except Exception as e:
-                logger.debug(f"Failed to fetch holidays for greeting: {e}")
+            except:
+                pass
 
+            # 检查是否启用 AI 生成问候语
             if not self.config.get("enable_ai_greeting", False):
                 return self._get_default_greeting(hour, moyu_list)
 
+            # 构建 prompt
             prompt_parts = [
                 f"现在是{date_info['date_str']} {date_info['week_cn']}",
                 f"时间是{hour}点",
             ]
 
             if moyu_list:
-                holiday_names = [h.get('name', '') for h in moyu_list if h.get('name')]
+                holiday_names = [h.get("name", "") for h in moyu_list if h.get("name")]
                 if holiday_names:
-                    prompt_parts.append(f"即将到来的节日：{', '.join(holiday_names[:2])}")
+                    prompt_parts.append(
+                        f"即将到来的节日：{', '.join(holiday_names[:2])}"
+                    )
 
-            if date_info.get('cn_date_str') and date_info.get('cn_date_str') != '农历未知':
+            if (
+                date_info.get("cn_date_str")
+                and date_info.get("cn_date_str") != "农历未知"
+            ):
                 prompt_parts.append(f"农历{date_info['cn_date_str']}")
 
             prompt = (
@@ -612,17 +1753,22 @@ html, body {
                 f"要求：1. 结合时间或节日 2. 亲切自然 3. 带上真寻的口吻 4. 只返回问候语文本，不要其他内容"
             )
 
+            # 尝试获取 LLM 提供商
             try:
-                provider_id = None
+                # 获取默认的聊天提供商
+                umo_for_provider = None
+                # 尝试从已学习的群映射里取一个会话ID，以便获取当前会话默认聊天模型
                 if self.group_umo_mapping:
                     umo_for_provider = next(iter(self.group_umo_mapping.values()))
-                    try:
-                        provider_id = await self.context.get_current_chat_provider_id(
-                            umo_for_provider
-                        )
-                    except Exception as e:
-                        logger.debug(f"Failed to get chat provider for {umo_for_provider}: {e}")
+                provider_id = (
+                    await self.context.get_current_chat_provider_id(
+                        umo=umo_for_provider
+                    )
+                    if umo_for_provider
+                    else None
+                )
                 if not provider_id:
+                    # 如果没有，取平台供应商实例中的第一个
                     insts = self.context.provider_manager.get_insts()
                     if insts:
                         provider_id = insts[0].meta().id
@@ -632,37 +1778,51 @@ html, body {
                         chat_provider_id=provider_id,
                         prompt=prompt,
                     )
-                    if llm_resp and hasattr(llm_resp, 'completion_text'):
-                        greeting = llm_resp.completion_text.strip().strip('"').strip("'").strip()
+
+                    if llm_resp and hasattr(llm_resp, "completion_text"):
+                        greeting = llm_resp.completion_text.strip()
+                        # 清理可能的引号
+                        greeting = greeting.strip('"').strip("'").strip()
                         if greeting and len(greeting) <= 50:
-                            logger.info(f"AI generated greeting: {greeting}")
+                            logger.info(f"AI 生成问候语: {greeting}")
                             return f"📰 {greeting}\n"
             except Exception as e:
-                logger.debug(f"AI greeting generation failed: {e}")
+                logger.debug(f"AI 生成问候语失败: {e}")
 
+            # 回退到默认问候语
             return self._get_default_greeting(hour, moyu_list)
 
         except Exception as e:
-            logger.warning(f"Failed to generate greeting: {e}")
+            logger.warning(f"生成问候语出错: {e}")
             return "📰 真寻日报来啦~\n"
 
     def _get_default_greeting(self, hour: int, moyu_list: list) -> str:
-        """Build a default (non-AI) greeting based on time of day and holidays.
-
-        Args:
-            hour: Current hour (0-23).
-            moyu_list: Upcoming holidays, each with 'name' and 'days_left'.
-
-        Returns:
-            The greeting text line.
-        """
+        """获取默认问候语（无 AI 时使用）"""
+        # 根据时间段选择问候语
         greetings = {
-            "morning": ["早安！新的一天开始啦~", "早上好！今日份日报送达~", "早安！美好的一天从日报开始~"],
-            "noon": ["中午好！午间日报来啦~", "中午好~来看看今天的资讯吧~", "午安！休息时刻看看日报~"],
-            "afternoon": ["下午好！日报新鲜出炉~", "下午茶时间，看看日报吧~", "下午好！今日资讯已备好~"],
-            "evening": ["晚上好！晚间日报送达~", "晚上好~睡前看看今日资讯吧~", "晚安前的日报时间~"],
+            "morning": [
+                "早安！新的一天开始啦~",
+                "早上好！今日份日报送达~",
+                "早安！美好的一天从日报开始~",
+            ],
+            "noon": [
+                "中午好！午间日报来啦~",
+                "中午好~来看看今天的资讯吧~",
+                "午安！休息时刻看看日报~",
+            ],
+            "afternoon": [
+                "下午好！日报新鲜出炉~",
+                "下午茶时间，看看日报吧~",
+                "下午好！今日资讯已备好~",
+            ],
+            "evening": [
+                "晚上好！晚间日报送达~",
+                "晚上好~睡前看看今日资讯吧~",
+                "晚安前的日报时间~",
+            ],
         }
 
+        # 判断时间段
         if 5 <= hour < 11:
             period_greetings = greetings["morning"]
         elif 11 <= hour < 14:
@@ -672,31 +1832,32 @@ html, body {
         else:
             period_greetings = greetings["evening"]
 
-        if moyu_list:
+        # 如果有节日信息，添加节日问候
+        if moyu_list and len(moyu_list) > 0:
             holiday = moyu_list[0]
-            if holiday.get('name'):
-                # days_left may be int or str depending on the data source
-                try:
-                    days_left = int(str(holiday.get('days_left', '')))
-                except (TypeError, ValueError):
-                    days_left = None
-                if days_left == 0:
+            if holiday.get("name"):
+                days_left = holiday.get("days", "")
+                if days_left == "0":
                     return f"📰 {holiday['name']}快乐！日报送上~\n"
-                elif days_left is not None and days_left <= 3:
+                elif days_left and int(days_left) <= 3:
                     return f"📰 距离{holiday['name']}还有{days_left}天！日报来啦~\n"
+
+        # 随机选择一个问候语
+        import random
 
         return f"📰 {random.choice(period_greetings)}\n"
 
     async def terminate(self):
-        """Stop background tasks and release the shared HTTP session."""
-        logger.info("Zhenxun daily report plugin unloading...")
+        logger.info("真寻日报插件正在卸载...")
+        # 取消定时推送任务
         if self.push_task and not self.push_task.done():
             self.push_task.cancel()
             try:
                 await self.push_task
             except asyncio.CancelledError:
                 pass
-            logger.info("Scheduled push task cancelled")
+            logger.info("定时推送任务已取消")
+        # 关闭共享的 HTTP session
         if self.http_session and not self.http_session.closed:
             await self.http_session.close()
-            logger.info("HTTP session closed")
+            logger.info("HTTP session 已关闭")

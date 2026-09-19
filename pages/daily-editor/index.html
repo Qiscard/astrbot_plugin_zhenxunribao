@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>真寻日报编辑器</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="editor">
+    <header class="toolbar">
+      <div class="toolbar-title">
+        <h2>真寻日报 · 模块编辑器</h2>
+        <p class="sub">点击画布面板编辑；中间区「＋ 添加中间模块」；面板右上角有 上移/下移/隐藏/删除。修改后点「保存配置」生效。</p>
+      </div>
+      <div class="toolbar-actions">
+        <button id="btn-reload" class="btn" type="button">刷新配置</button>
+        <button id="btn-preview" class="btn" type="button">预览真实日报</button>
+        <button id="btn-save" class="btn btn-primary" type="button">保存配置</button>
+      </div>
+    </header>
+
+    <div id="message" class="message hidden"></div>
+
+    <main class="canvas-pane">
+      <div class="canvas-head">
+        <strong>编辑画布</strong>
+        <span class="badge">点击面板编辑 · 自适应高度</span>
+      </div>
+      <div class="canvas-scroll">
+        <div id="preview" class="daily-preview" tabindex="-1" aria-label="日报编辑画布"></div>
+      </div>
+      <div class="canvas-foot muted">画布为布局占位，用于快速编辑；「预览真实日报」会真实请求接口并渲染最终图片。</div>
+    </main>
+  </div>
+
+  <!-- 编辑模态框（点击画布元素打开） -->
+  <div id="modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-mask" data-close-modal></div>
+    <div class="modal-card">
+      <div class="modal-head">
+        <strong id="modal-title">编辑</strong>
+        <button type="button" class="btn btn-mini" data-close-modal>✕</button>
+      </div>
+      <div id="modal-body" class="modal-body"></div>
+      <div class="modal-foot">
+        <button type="button" class="btn" data-close-modal>完成</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 真实预览模态框 -->
+  <div id="preview-modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-mask" data-close-preview></div>
+    <div class="modal-card preview-card">
+      <div class="modal-head">
+        <strong>真实日报预览</strong>
+        <button type="button" class="btn btn-mini" data-close-preview>✕</button>
+      </div>
+      <div class="preview-body">
+        <div id="preview-status" class="preview-status"></div>
+        <img id="preview-image" class="preview-image hidden" alt="日报预览" />
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="btn" data-close-preview>关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
