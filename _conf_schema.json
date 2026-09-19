@@ -9,7 +9,7 @@
   "milora_api_key": {
     "description": "Milora API Key",
     "type": "string",
-    "hint": "用于 AI早报 / 每日人民日报。以查询参数 key 传递。免费额度下可留空；若接口要求鉴权请到 https://api.milorapart.top 注册获取",
+    "hint": "用于 AI早报。以查询参数 key 传递。免费额度下可留空；若接口要求鉴权请到 https://api.milorapart.top 注册获取",
     "default": "",
     "secret": true
   },

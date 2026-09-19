@@ -65,14 +65,6 @@ MODULE_TYPE_META = {
         "render": "news",
         "has_count": True,
     },
-    "countdown": {
-        "title": "自定义倒计时",
-        "count": 0,
-        "icon": "./res/icon/fish.png",
-        "slots": ["body", "lead"],
-        "render": "countdown",
-        "has_items": True,
-    },
     "english": {
         "title": "每日英语",
         "count": 1,
@@ -96,13 +88,6 @@ MODULE_TYPE_META = {
         "slots": ["body"],
         "render": "aidaily",
         "has_count": True,
-    },
-    "rmrbpdf": {
-        "title": "每日人民日报",
-        "count": 0,
-        "icon": "./res/icon/game.png",
-        "slots": ["body"],
-        "render": "rmrbpdf",
     },
     "cartoon": {
         "title": "今日追番",
@@ -150,15 +135,6 @@ MODULE_PARAM_SCHEMA = {
             ],
             "default": "txt",
         },
-        {
-            "key": "date",
-            "label": "日期",
-            "type": "text",
-            "placeholder": "YYYY-MM-DD，留空当天",
-            "default": "",
-        },
-    ],
-    "rmrbpdf": [
         {
             "key": "date",
             "label": "日期",
@@ -236,22 +212,16 @@ MID1_SOURCE_LABELS = {
 MID2_SOURCE_LABELS = {
     "news": "60s读懂世界",
     "aidaily": "AI早报",
-    "rmrbpdf": "每日人民日报",
 }
 
 # modules.json 不存在时写入的默认配置
 DEFAULT_MODULE_CONFIG = {
     "moyu_title": "摸鱼日历",
-    # 摸鱼日历固定展示在左上角，按顺序展示计时项（最多 10 条）
+    # 摸鱼日历固定展示在左上角，按顺序展示计时项（最多 10 条），默认留空由用户自行添加。
     # 类型：holiday=下一个法定节假日；custom=自定义计时(YYYY-MM-DD 一次性 / MM-DD 每年循环)；
-    #      weekly=周休日（按周期）
-    "moyu_items": [
-        {"type": "holiday"},
-        {"type": "holiday"},
-        {"type": "holiday"},
-        {"type": "weekly", "name": "周休日", "weekday": 6},
-        {"type": "custom", "name": "元旦", "date": "01-01"},
-    ],
+    #      weekend=周末（weekday 仅支持 6=周六 / 7=周日）
+    # 每条计时项可自定义前段文字 prefix（默认「距离」）与后段文字 suffix（默认「还剩」）。
+    "moyu_items": [],
     # 历史上的今天固定展示在摸鱼日历右侧
     "history_enabled": True,
     "history_title": "历史上的今天",
@@ -270,9 +240,9 @@ DEFAULT_MODULE_CONFIG = {
     "mid2_title": "60s读懂世界",
     "mid2_count": 10,
     "mid2_params": {},
-    # 实时汇率参数
+    # 实时汇率参数：一个源货币，可配置多个目标货币（最多 6 个）
     "exchange_from": "USD",
-    "exchange_to": "CNY",
+    "exchange_targets": ["CNY"],
     "exchange_amount": 100,
     # 底栏引用固定展示在日报底部，quote_sources 可多选（每次随机取其一）
     "quote_enabled": True,
@@ -472,21 +442,6 @@ class ZhenxunReportPlugin(Star):
             logger.error(f"AI早报获取失败: {e}", exc_info=True)
             yield event.plain_result(f"❌ AI早报获取失败: {e}")
 
-    @filter.command("人民日报")
-    async def milora_rmrb_cmd(self, event: AstrMessageEvent):
-        """获取每日人民日报 PDF，使用命令默认日期。"""
-        try:
-            data = await self.milora_api.get_rmrbpdf()
-            if data and data.get("url"):
-                yield event.plain_result(
-                    f"📰 人民日报 {data.get('date') or ''}\n{data['url']}"
-                )
-            else:
-                yield event.plain_result("❌ 人民日报获取失败，请稍后再试")
-        except Exception as e:
-            logger.error(f"人民日报获取失败: {e}", exc_info=True)
-            yield event.plain_result(f"❌ 人民日报获取失败: {e}")
-
     @filter.command("追番")
     async def cartoon_cmd(self, event: AstrMessageEvent):
         """获取腾讯动漫今日更新列表。"""
@@ -649,6 +604,21 @@ class ZhenxunReportPlugin(Star):
                 if "quote_sources" not in raw_keys and m.get("mode"):
                     cfg["quote_sources"] = [m["mode"]]
                 continue
+            if mtype == "countdown":
+                # 旧版配置迁移：自定义倒计时已并入摸鱼日历，条目转为 custom 计时项
+                legacy_items = m.get("items")
+                if isinstance(legacy_items, list):
+                    for item in legacy_items[:10]:
+                        if not isinstance(item, dict):
+                            continue
+                        entry = {"type": "custom"}
+                        if item.get("name"):
+                            entry["name"] = str(item["name"])
+                        if item.get("date"):
+                            entry["date"] = str(item["date"])
+                        if len(entry) > 1:
+                            cfg["moyu_items"].append(entry)
+                continue
             if mtype not in known_types:
                 logger.warning(f"忽略非法模块配置: {m}")
                 continue
@@ -661,10 +631,6 @@ class ZhenxunReportPlugin(Star):
                     )
                 except (TypeError, ValueError):
                     m["count"] = DEFAULT_MODULE_COUNTS[mtype]
-            elif mtype == "countdown":
-                if not isinstance(m.get("items"), list):
-                    m["items"] = []
-                m["items"] = [item for item in m["items"] if isinstance(item, dict)][:10]
             # 归一化接口请求参数（仅带请求参数的模块才写入 params 字段）
             if mtype in MODULE_PARAM_SCHEMA:
                 m["params"] = self._normalize_module_params(mtype, m.get("params"))
@@ -672,6 +638,31 @@ class ZhenxunReportPlugin(Star):
                 m.pop("params", None)
             valid_modules.append(m)
         cfg["modules"] = valid_modules
+
+        # 摸鱼日历计时项：清洗类型/自定义文字，兼容旧版 weekly 名称，最多 10 条
+        valid_moyu = []
+        for item in cfg["moyu_items"]:
+            itype = item.get("type")
+            if itype == "weekly":
+                # 旧版字段迁移：weekly 更名为 weekend，仅保留周六/周日
+                itype = "weekend"
+            if itype is None:
+                itype = "custom" if item.get("date") else "holiday"
+            entry = {"type": itype}
+            if itype == "weekend":
+                try:
+                    weekday = int(item.get("weekday", 6))
+                except (TypeError, ValueError):
+                    weekday = 6
+                entry["weekday"] = weekday if weekday in (6, 7) else 6
+            if itype in ("custom", "weekend"):
+                entry["name"] = str(item.get("name") or "").strip()
+                entry["prefix"] = str(item.get("prefix") or "").strip()
+                entry["suffix"] = str(item.get("suffix") or "").strip()
+            if itype == "custom":
+                entry["date"] = str(item.get("date") or "").strip()
+            valid_moyu.append(entry)
+        cfg["moyu_items"] = valid_moyu[:10]
 
         cfg["history_enabled"] = bool(cfg["history_enabled"])
         cfg["history_title"] = str(cfg["history_title"] or "历史上的今天")
@@ -713,9 +704,24 @@ class ZhenxunReportPlugin(Star):
         cfg["mid2_params"] = self._normalize_module_params(
             cfg["mid2_source"], cfg.get("mid2_params")
         )
-        # 实时汇率参数
-        cfg["exchange_from"] = str(cfg.get("exchange_from") or "USD").strip().upper()[:3] or "USD"
-        cfg["exchange_to"] = str(cfg.get("exchange_to") or "CNY").strip().upper()[:3] or "CNY"
+        # 实时汇率参数：一个源货币 + 多个目标货币
+        cfg["exchange_from"] = (
+            str(cfg.get("exchange_from") or "USD").strip().upper()[:3] or "USD"
+        )
+        if "exchange_targets" in raw_keys:
+            raw_targets = cfg.get("exchange_targets")
+        elif "exchange_to" in raw_keys:
+            # 旧版配置迁移：仅配置了 exchange_to 单值 → 目标货币列表
+            raw_targets = [raw.get("exchange_to")]
+        else:
+            raw_targets = cfg.get("exchange_targets")
+        targets = []
+        for t in raw_targets:
+            code = str(t or "").strip().upper()[:3]
+            if code and code not in targets and code != cfg["exchange_from"]:
+                targets.append(code)
+        cfg["exchange_targets"] = targets[:6]
+        cfg.pop("exchange_to", None)
         try:
             cfg["exchange_amount"] = max(0.01, float(cfg.get("exchange_amount", 100)))
         except (TypeError, ValueError):
@@ -858,21 +864,25 @@ class ZhenxunReportPlugin(Star):
     def _resolve_timer_rows(
         self, items: list, holiday_pool: list | None = None
     ) -> list:
-        """把计时项配置解析为展示行，供摸鱼日历和倒计时模块共用。
+        """把摸鱼日历计时项配置解析为展示行。
 
         Args:
-            items: 计时项列表，每项为 {"type": "holiday"|"custom"|"weekly", ...}。
+            items: 计时项列表，每项为
+                {"type": "holiday"|"custom"|"weekend", "name", "prefix", "suffix", ...}。
             holiday_pool: 节假日数据（按顺序供 holiday 类型计时项消费），无则为 None。
 
         Returns:
-            展示行列表，每项为 {"name": ..., "days": ..., "countup": bool}：
-            countup=False 表示倒计时（还剩 N 天），True 表示正计时（过了 N 天）。
+            展示行列表，每项为
+            {"name": ..., "days": ..., "prefix": ..., "suffix": ...}：
+            suffix 默认按正/倒计时取「过了」或「还剩」，可由计时项自定义。
         """
         rows = []
         next_holiday = 0
         for item in items:
-            # countdown 模块的条目允许省略 type，带 date 即视为自定义倒计时
-            itype = item.get("type") or ("custom" if item.get("date") else None)
+            # 兼容省略 type 的旧配置：带 date 即视为自定义计时
+            itype = item.get("type") or ("custom" if item.get("date") else "holiday")
+            if itype == "weekly":
+                itype = "weekend"
             row = None
             if itype == "holiday":
                 if holiday_pool and next_holiday < len(holiday_pool):
@@ -891,16 +901,27 @@ class ZhenxunReportPlugin(Star):
                         "days": str(abs(days)),
                         "countup": days < 0,
                     }
-            elif itype == "weekly":
+            elif itype == "weekend":
+                weekday = item.get("weekday", 6)
+                try:
+                    weekday = int(weekday)
+                except (TypeError, ValueError):
+                    weekday = 6
+                if weekday not in (6, 7):
+                    weekday = 6
                 row = {
-                    "name": item.get("name") or "周休日",
-                    "days": str(days_until_weekday(item.get("weekday", 6))),
+                    "name": item.get("name") or ("周六" if weekday == 6 else "周日"),
+                    "days": str(days_until_weekday(weekday)),
                     "countup": False,
                 }
             else:
                 logger.warning(f"忽略无法解析的计时项: {item}")
                 continue
             if row:
+                # 前后段文字可自定义，留空则使用默认文案
+                row["prefix"] = item.get("prefix") or "距离"
+                row["suffix"] = item.get("suffix") or ("过了" if row["countup"] else "还剩")
+                row.pop("countup", None)
                 rows.append(row)
         return rows
 
@@ -1090,17 +1111,19 @@ html, body {
                 )
             )
         elif module_cfg["top_source"] == "exchange":
-            tasks.append(
-                (
-                    "exchange",
-                    None,
-                    self.tangdouz_api.get_exchange_rate(
-                        from_currency=module_cfg["exchange_from"],
-                        to_currency=module_cfg["exchange_to"],
-                        amount=module_cfg["exchange_amount"],
-                    ),
+            targets = module_cfg.get("exchange_targets") or []
+            for target in targets:
+                tasks.append(
+                    (
+                        "exchange",
+                        {"to": target},
+                        self.tangdouz_api.get_exchange_rate(
+                            from_currency=module_cfg["exchange_from"],
+                            to_currency=target,
+                            amount=module_cfg["exchange_amount"],
+                        ),
+                    )
                 )
-            )
         if module_cfg["quote_enabled"]:
             source = random.choice(module_cfg["quote_sources"])
             tasks.append(("quote", None, self._fetch_quote_text(source)))
@@ -1184,22 +1207,6 @@ html, body {
                     ),
                 )
             )
-        elif mid2_source == "rmrbpdf":
-            mid2_module = {
-                "type": "rmrbpdf",
-                "title": module_cfg["mid2_title"],
-                "count": 0,
-                "params": module_cfg["mid2_params"],
-            }
-            tasks.append(
-                (
-                    "rmrbpdf",
-                    mid2_module,
-                    self.milora_api.get_rmrbpdf(
-                        date=module_cfg["mid2_params"].get("date", "")
-                    ),
-                )
-            )
 
         # free modules（旧版可排序模块列表）——跳过已被中部固定模块位占用的类型
         modules = [
@@ -1255,15 +1262,6 @@ html, body {
                         ),
                     )
                 )
-            elif mtype == "rmrbpdf":
-                params = m.get("params") or {}
-                tasks.append(
-                    (
-                        "rmrbpdf",
-                        m,
-                        self.milora_api.get_rmrbpdf(date=params.get("date", "")),
-                    )
-                )
             elif mtype == "cartoon":
                 params = m.get("params") or {}
                 tasks.append(
@@ -1306,7 +1304,7 @@ html, body {
         history_events: list = []
         quote_data = None
         module_views = []
-        exchange_data = None
+        exchange_rows: list = []
         for (kind, m, _), res in zip(tasks, results):
             if isinstance(res, Exception):
                 logger.warning(f"{kind} 数据获取失败: {res}")
@@ -1314,10 +1312,11 @@ html, body {
             if kind == "history":
                 history_events = res or []
             elif kind == "exchange":
-                exchange_data = res
+                if isinstance(res, dict) and res.get("result") is not None:
+                    exchange_rows.append(res)
             elif kind == "quote":
                 quote_data = res
-            elif kind in ("anime", "cartoon", "hbox", "news", "aidaily", "rmrbpdf") and kind in (
+            elif kind in ("anime", "cartoon", "hbox", "news", "aidaily") and kind in (
                 module_cfg.get("mid1_source"),
                 module_cfg.get("mid2_source"),
             ):
@@ -1327,8 +1326,6 @@ html, body {
                     data = (res or {}).get("games") if isinstance(res, dict) else None
                 elif kind == "cartoon" and isinstance(data, dict):
                     data["items"] = (data.get("items") or [])[: max(1, int(m.get("count", 6)))]
-                elif kind == "rmrbpdf":
-                    data = res
                 if data:
                     module_views.append(
                         {
@@ -1345,9 +1342,7 @@ html, body {
                     logger.warning(f"中部模块 {kind} 无数据，本次跳过")
             else:
                 data = res if res is not None else []
-                if kind == "countdown":
-                    data = self._resolve_timer_rows(m.get("items") or [])
-                elif kind == "cartoon" and isinstance(data, dict):
+                if kind == "cartoon" and isinstance(data, dict):
                     data["items"] = (data.get("items") or [])[: max(1, int(m.get("count", 6)))]
                 elif kind in ("essay", "shici", "yulu") and isinstance(data, dict):
                     data = [data]
@@ -1362,6 +1357,14 @@ html, body {
                     )
                 else:
                     logger.warning(f"模块 {kind}({m['title']}) 无数据，本次跳过")
+
+        exchange_data = None
+        if exchange_rows:
+            exchange_data = {
+                "from": module_cfg["exchange_from"],
+                "amount": module_cfg["exchange_amount"],
+                "rows": exchange_rows,
+            }
 
         moyu_rows = self._resolve_timer_rows(
             module_cfg["moyu_items"], holiday_pool=holiday_pool

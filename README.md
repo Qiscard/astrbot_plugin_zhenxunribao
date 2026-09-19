@@ -11,9 +11,9 @@
 这是一个从 [nonebot-plugin-zxreport](https://github.com/HibiKier/nonebot-plugin-zxreport) 移植到 AstrBot 的真寻日报插件。插件会每日为你汇总最新的资讯内容，采用 **4 个固定模块位** 布局：顶部模块、中部模块1、中部模块2、底部引用；每个模块位从候选接口中单选一个展示。
 
 内置候选来源：
-- 顶部模块：历史上的今天 / 每日英语 / 实时汇率
+- 顶部模块：历史上的今天 / 每日英语 / 实时汇率（一个源货币可配多个目标货币）
 - 中部模块1：今日新番 / 今日追番 / 小黑盒游戏
-- 中部模块2：60s读懂世界 / AI早报 / 每日人民日报 PDF
+- 中部模块2：60s读懂世界 / AI早报
 - 底部引用：今日一言 / 毒鸡汤 / 名人名言 / 舔狗日记 / 搞笑语录 / 歇后语 / 随机一言 / 随机谜语
 
 日报内容优先走糖豆子（tangdouz）免费接口，ALAPI 仅作为备用通道。
@@ -50,7 +50,7 @@ playwright install chromium
 | 配置 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `alapi_token` | str | `""` | ALAPI Token（备用通道），用于免费接口失败后的备用请求。建议在 Schema 中以密文方式显示。 |
-| `milora_api_key` | str | `""` | Milora API Key，用于 AI早报和每日人民日报；模块的 type/date 参数在日报编辑器中配置。 |
+| `milora_api_key` | str | `""` | Milora API Key，用于 AI早报；模块的 type/date 参数在日报编辑器中配置。 |
 | `render_dpr` | int | `5` | 渲染清晰度（DPR），运行时限制为 1-6，建议 3-6。 |
 | `enable_scheduled_push` | bool | `false` | 是否启用定时推送，启用后会在指定时间自动推送日报到配置的群组 |
 | `scheduled_push_time` | str | `"08:00"` | 定时推送时间，HH:MM格式（24小时制），例如：`08:00` 表示每天早上8点 |
@@ -76,17 +76,19 @@ playwright install chromium
 
 ```jsonc
 {
-  // 摸鱼日历：位置固定在左上角，标题可改，展示内容按顺序渲染（最多 10 条）
+  // 摸鱼日历：位置固定在左上角，标题可改，展示内容按顺序渲染（最多 10 条），默认为空
   "moyu_title": "摸鱼日历",
   "moyu_items": [
-    // 三种计时项类型：
+    // 三种计时项类型（prefix/suffix 为该行前后段文字，留空用默认「距离」「还剩」）：
     // holiday：自动取下一个法定节假日（多条 holiday 依次取后续节日）
     { "type": "holiday" },
-    // weekly：周期性计时，weekday 1=周一 ... 7=周日；name 不填则显示「周休日」
-    { "type": "weekly", "name": "周休日", "weekday": 6 },
-    // custom：自定义计时，一次性日期过期自动变为「过了N天」，未来为「还剩N天」
+    // weekend：周末倒计时，weekday 仅支持 6=周六 / 7=周日；name 不填则显示「周六/周日」
+    { "type": "weekend", "name": "周六", "weekday": 6 },
+    // custom：自定义计时，一次性日期过期自动变为「过了N天」（suffix 可自定义）
     //         "MM-DD" 为每年循环的日期（如生日、纪念日），始终显示「还剩N天」
     { "type": "custom", "name": "元旦", "date": "01-01" },
+    // 自定义前后段文字示例：显示「离 国庆节 还有 N 天」
+    { "type": "custom", "name": "国庆节", "date": "10-01", "prefix": "离", "suffix": "还有" },
     // custom 条目也可以省略 type，带 date 即可
     { "name": "项目上线", "date": "2026-01-01" }
   ],
@@ -98,32 +100,32 @@ playwright install chromium
   "mid1_title": "今日新番",
   "mid1_count": 4,
   "mid1_params": {},
-  // 中部模块2来源：news / aidaily / rmrbpdf；aidaily 可配置 type/date，rmrbpdf 可配置 date
+  // 中部模块2来源：news / aidaily；aidaily 可配置 type/date
   "mid2_source": "news",
   "mid2_title": "60s读懂世界",
   "mid2_count": 10,
   "mid2_params": {},
-  // 汇率参数（仅 top_source=exchange 时生效）
+  // 汇率参数（仅 top_source=exchange 时生效）：一个源货币 + 多个目标货币（最多 6 个）
   "exchange_from": "USD",
-  "exchange_to": "CNY",
+  "exchange_targets": ["CNY", "JPY"],
   "exchange_amount": 100,
-  // 底部引用来源单选：hitokoto / duji / mingyan / tiangou / gaoxiao / xiehouyu / sjyy / riddle
+  // 底部引用来源多选：hitokoto / duji / mingyan / tiangou / gaoxiao / xiehouyu / sjyy / riddle
   "quote_enabled": true,
   "quote_title": "",
   "quote_sources": ["hitokoto"],
-  // 旧版 modules 列表保留，但与 mid1/mid2 同类型的模块会被自动跳过
+  // 附加模块列表，纵向排列；与 mid1/mid2 同类型的模块会被自动跳过
   "modules": []
 }
 ```
 
 说明：
 - 摸鱼日历、4 个固定模块位位置固定；固定模块的来源、标题、条数和接口参数均可在日报编辑器配置；
-- 摸鱼日历展示条数即 `moyu_items` 列表长度（1-10 条）；
+- 摸鱼日历计时项默认为空，可在编辑器中添加节假日 / 周末 / 自定义日期三类，每条均可自定义前后段文字（如「离」「还有」）；
 - 各面板数据为空（获取失败或无内容）时自动隐藏，不影响其他面板；
-- 旧版把 `history`/`quote` 写在 `modules` 里的配置会自动迁移为固定面板配置；
-- `alapi_token` 只用于 ALAPI 备用通道；Milora 的 AI早报/人民日报使用 `milora_api_key`。
-- 固定模块位和自由 `modules` 列表都可保存接口 `params`；固定槽位参数由 `mid1_params` / `mid2_params` 保存。
-- `/AI早报`、`/人民日报`、`/追番` 等聊天命令使用命令默认参数，不读取日报编辑器中的模块参数；日报编辑器配置只影响日报图片生成。
+- 旧版把 `history`/`quote`/`countdown` 写在 `modules` 里的配置会自动迁移（countdown 条目转为摸鱼日历自定义计时项）；旧 `weekly` 计时项自动更名 `weekend`（仅保留周六/周日）；旧 `exchange_to` 单值自动迁移为 `exchange_targets` 列表；
+- `alapi_token` 只用于 ALAPI 备用通道；Milora 的 AI早报使用 `milora_api_key`。
+- 固定模块位和附加 `modules` 列表都可保存接口 `params`；固定槽位参数由 `mid1_params` / `mid2_params` 保存。
+- `/AI早报`、`/追番` 等聊天命令使用命令默认参数，不读取日报编辑器中的模块参数；日报编辑器配置只影响日报图片生成。
 
 ## 🎁 使用
 
@@ -166,7 +168,7 @@ playwright install chromium
 
 ## 🖋 字体说明
 
-本插件渲染日报图片时使用了 **HarmonyOS Sans** 字体文件以提升跨系统一致性与清晰度。
+本插件渲染日报图片时内嵌了 **Noto Sans SC**（正文）与 **SSFangTangTi**（标题）字体文件，保证跨系统渲染一致。字体文件体积较大（约 19MB），会在渲染时以 Base64 嵌入 HTML。
 
 ## ⚠️ 注意事项
 
@@ -174,7 +176,6 @@ playwright install chromium
 2. **Playwright 安装**：首次使用需要安装 Playwright 的 Chromium 浏览器，执行 `playwright install chromium`
 3. **网络环境**：插件需要访问多个外部API，请确保网络连接正常
 4. **群组ID获取**：配置定时推送时，可以通过在目标群内发送 `/日报` 后查看日志获取正确的群组ID格式
-
 ## 🛠️ 技术实现
 
 - 使用 **Jinja2** 渲染HTML模板
@@ -184,17 +185,27 @@ playwright install chromium
 
 ## 📝 功能特性
 
-- 📰 **顶部模块** - 历史上的今天 / 每日英语 / 实时汇率（三选一固定面板）
+- 📰 **顶部模块** - 历史上的今天 / 每日英语 / 实时汇率（三选一固定面板，汇率支持一个源货币配多个目标货币）
 - 📺 **中部模块1** - 今日新番 / 今日追番 / 小黑盒游戏（三选一固定面板）
-- 🤖 **中部模块2** - 60s读懂世界 / AI早报 / 每日人民日报（三选一固定面板）
+- 🤖 **中部模块2** - 60s读懂世界 / AI早报（二选一固定面板）
 - 💬 **底部引用** - 一言/毒鸡汤/名言/谜语/随机一言等（可多选，每次随机取其一）
-- 🐟 **摸鱼日历** - 节假日与重要日期正/倒计时，支持周休日与自定义日期
+- 🐟 **摸鱼日历** - 节假日 / 周末 / 自定义日期正倒计时，每条支持自定义前后段文字
 - 🕰 **历史上的今天** - 历史上的今日事件（候选来源）
 - 🎲 **随机谜语** - 日报仅展示谜面，答题请使用聊天命令
 - 🎮 **小黑盒游戏** - 免费/折扣游戏与热门推荐
-- 💱 **实时汇率** - 支持自定义换算金额与币种
+- 💱 **实时汇率** - 支持自定义换算金额、源货币与多个目标货币
 
 ## 📝 更新日志
+
+### `1.5.0`
+
+- **字体精简**：移除从未参与渲染的 HarmonyOS Sans 双字体与 Noto Sans SC Black（约 26MB）；英文标题改用站酷方糖体（SSFangTangTi），嵌入 HTML 体积减少约 55%。
+- **摸鱼日历**：默认不再预置任何计时项（完全为空）；每条计时项的前段文字（默认「距离」）与后段文字（默认「还剩」）均可自定义；「周期」类型更名为「周末」，仅可选择周六/周日。
+- **实时汇率**：支持一个源货币同时配置多个目标货币（最多 6 个），旧 `exchange_to` 单值自动迁移。
+- **编辑器**：所有修改（含接口参数选择）即时自动保存，无需点击「完成」；面板与弹窗命名明确区分「固定位」与「附加模块」。
+- **移除自定义倒计时模块**：其自定义日期功能并入摸鱼日历（旧 countdown 条目自动迁移为摸鱼日历自定义计时项）。
+- **移除每日人民日报接口**：该接口仅返回 PDF 链接，无法在日报图片中直接查看。
+- **文档同步**：修正字体说明、候选来源列表与配置示例。
 
 ### `1.4.0`
 

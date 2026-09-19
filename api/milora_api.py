@@ -1,6 +1,6 @@
 """
 MiloraAPI (api.milorapart.top) 客户端
-封装 AI早报 (aidaily) 与 每日人民日报 (rmrbpdf)。
+封装 AI早报 (aidaily)。
 鉴权来自插件配置；业务参数由日报模块按调用传入。
 """
 import re
@@ -38,13 +38,11 @@ class MiloraAPI(BaseAPI):
         api_key: str = "",
         aidaily_type: str = "txt",
         aidaily_date: str = "",
-        rmrbpdf_date: str = "",
     ):
         super().__init__(session)
         self.api_key = (api_key or "").strip()
         self.aidaily_type = (aidaily_type or "txt").strip().lower() or "txt"
         self.aidaily_date = (aidaily_date or "").strip()
-        self.rmrbpdf_date = (rmrbpdf_date or "").strip()
 
     async def _get(self, path: str, params: Optional[dict] = None) -> Optional[dict]:
         """GET Milora /apis 接口并返回 JSON 字典。
@@ -185,28 +183,4 @@ class MiloraAPI(BaseAPI):
             "items": items,
             "content": content,
             "image_url": "",
-        }
-
-    async def get_rmrbpdf(self, date: str = "") -> Optional[dict]:
-        """获取每日人民日报 PDF 信息。
-
-        Args:
-            date: 日期 YYYY-MM-DD，空则用实例默认（再空表示当天）。
-
-        Returns:
-            {"date": "YYYY-MM-DD", "url": "https://...pdf"}，失败返回 None。
-        """
-        date = (date or self.rmrbpdf_date).strip()
-        params: dict = {}
-        if date:
-            params["date"] = date
-        data = await self._get("/rmrbpdf", params)
-        if not data:
-            return None
-        url = str(data.get("url") or "").strip()
-        if not url:
-            return None
-        return {
-            "date": str(data.get("date") or date or "").strip(),
-            "url": url,
         }

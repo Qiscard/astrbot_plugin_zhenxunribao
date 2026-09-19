@@ -17,8 +17,8 @@ body {
 }
 
 :root {
-  --font-body: "Noto Sans SC", "HarmonyOS Sans SC", "Microsoft YaHei UI", sans-serif;
-  --font-title-en: "Noto Sans SC Black", "Noto Sans SC", "Microsoft YaHei UI", sans-serif;
+  --font-body: "Noto Sans SC", "Microsoft YaHei UI", sans-serif;
+  --font-title-en: "SSFangTangTi", "Noto Sans SC", "Microsoft YaHei UI", sans-serif;
   --pink-bg: #e8aebb;
   --panel-bg: #ece7eb;
   --panel-border: #ee97ae;
@@ -30,14 +30,6 @@ body {
   --text-main: #252630;
   --text-soft: #9f7687;
   --text-accent: #ff8ca7;
-}
-
-@font-face {
-  font-family: "Noto Sans SC Black";
-  src: url("./res/font/noto-sans-sc-black.otf") format("opentype");
-  font-weight: 900;
-  font-style: normal;
-  font-display: swap;
 }
 
 @font-face {
@@ -59,22 +51,6 @@ body {
 @font-face {
   font-family: "SSFangTangTi";
   src: url("./res/font/SSFangTangTi.ttf");
-}
-
-@font-face {
-  font-family: "HarmonyOS Sans SC";
-  src: url("./res/font/HarmonyOS_Sans_SC_Regular.ttf") format("truetype");
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: "HarmonyOS Sans SC";
-  src: url("./res/font/HarmonyOS_Sans_SC_Bold.ttf") format("truetype");
-  font-weight: 700;
-  font-style: normal;
-  font-display: swap;
 }
 
 .wrapper {
@@ -129,7 +105,6 @@ body {
 .title-en {
   margin: 8px 0 0 7px;
   font-family: var(--font-title-en);
-  font-weight: 900;
   font-size: 24px;
   line-height: 1;
   letter-spacing: 0.5px;
@@ -497,31 +472,6 @@ body {
   border-radius: 10px;
 }
 
-.rmrbpdf-box {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 4px 2px 2px;
-}
-
-.rmrbpdf-date {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text-main);
-}
-
-.rmrbpdf-url {
-  font-size: 11px;
-  line-height: 1.5;
-  color: var(--text-soft);
-  word-break: break-all;
-}
-
-.rmrbpdf-tip {
-  font-size: 12px;
-  color: var(--text-accent);
-}
-
 .cartoon-list {
   display: flex;
   flex-direction: column;
@@ -681,17 +631,13 @@ body {
 </head>
 
 <body>
-    {% macro countdown_list(rows) %}
+    {% macro timer_list(rows) %}
         <div class="moyu-list">
             {% for row in rows %}
             <div class="moyu-item">
-                <span>距离</span>
+                <span>{{ row.prefix }}</span>
                 <span class="holiday-name">{{ row.name }}</span>
-                {% if row.countup %}
-                <span>过了</span>
-                {% else %}
-                <span>还剩</span>
-                {% endif %}
+                <span>{{ row.suffix }}</span>
                 <span class="holiday-days">{{ row.days }}</span>
                 <span>天</span>
             </div>
@@ -790,14 +736,6 @@ body {
         </div>
     {% endmacro %}
 
-    {% macro rmrbpdf_block(data) %}
-        <div class="rmrbpdf-box">
-            {% if data.date %}<div class="rmrbpdf-date">{{ data.date }} 人民日报</div>{% endif %}
-            <div class="rmrbpdf-tip">今日电子版 PDF</div>
-            {% if data.url %}<div class="rmrbpdf-url">{{ data.url }}</div>{% endif %}
-        </div>
-    {% endmacro %}
-
     {% macro cartoon_block(data) %}
         <div class="cartoon-list">
             {% if data.today_week %}<div class="cartoon-meta">{{ data.today_week }} 更新</div>{% endif %}
@@ -860,15 +798,17 @@ body {
 
     {% macro exchange_block(data) %}
         <div class="exchange-list">
+            {% for row in data['rows'] %}
             <div class="exchange-row">
                 <span class="exchange-amount">{{ data.amount }} {{ data.from }}</span>
                 <span class="exchange-eq">≈</span>
-                <span class="exchange-result">{{ "%.2f"|format(data.result) }} {{ data.to }}</span>
+                <span class="exchange-result">{{ "%.2f"|format(row.result) }} {{ row.to }}</span>
             </div>
             <div class="exchange-meta">
-                参考汇率 1 {{ data.from }} = {{ "%.4f"|format(data.rate) }} {{ data.to }}
-                {% if data.update_time %}<span class="exchange-time">（{{ data.update_time }}）</span>{% endif %}
+                参考汇率 1 {{ data.from }} = {{ "%.4f"|format(row.rate) }} {{ row.to }}
+                {% if row.update_time %}<span class="exchange-time">（{{ row.update_time }}）</span>{% endif %}
             </div>
+            {% endfor %}
         </div>
     {% endmacro %}
 
@@ -879,16 +819,12 @@ body {
                 {{ anime_grid(mod.data) }}
             {% elif mod.type == 'news' %}
                 {{ news_list(mod.data) }}
-            {% elif mod.type == 'countdown' %}
-                {{ countdown_list(mod.data) }}
             {% elif mod.type == 'english' %}
                 {{ english_list(mod.data) }}
             {% elif mod.type == 'essay' %}
                 {{ essay_list(mod.data) }}
             {% elif mod.type == 'aidaily' %}
                 {{ aidaily_block(mod.data) }}
-            {% elif mod.type == 'rmrbpdf' %}
-                {{ rmrbpdf_block(mod.data) }}
             {% elif mod.type == 'cartoon' %}
                 {{ cartoon_block(mod.data) }}
             {% elif mod.type == 'shici' %}
@@ -925,7 +861,7 @@ body {
                 {% if moyu_rows %}
                 <div class="panel moyu-panel">
                     <div class="panel-tag"><img src="./res/icon/fish.png" alt="摸鱼" onerror="this.style.display='none'">{{ moyu_title }}</div>
-                    {{ countdown_list(moyu_rows) }}
+                    {{ timer_list(moyu_rows) }}
                 </div>
                 {% endif %}
                 {% if top_view %}
